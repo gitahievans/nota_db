@@ -11,9 +11,12 @@ class PDFFile(models.Model):
     description = models.TextField()
     uploaded_at = models.DateTimeField(auto_now_add=True)
     pdf_file = models.FileField(upload_to="", storage=PDFFileStorage(), blank=True)
+    composer = models.CharField(
+        max_length=100, blank=False, null=False, default="Anonymous"
+    )
 
     def __str__(self):
-        return self.title
+        return f"{self.title} - {self.composer}"
 
     class Meta:
         ordering = ["-uploaded_at"]
