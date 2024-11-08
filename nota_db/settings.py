@@ -77,7 +77,7 @@ DATABASES = {"default": dj_database_url.parse(database_url)}
 
 CORS_ALLOWED_ORIGINS = [
     "https://nota-db-git-main-gitahievans-projects.vercel.app",  # Vercel frontend URL
-    "http://localhost:3000",  # Localhost for local development
+    "http://localhost:5173",  # Localhost for local development
 ]
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOW_METHODS = [
