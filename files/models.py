@@ -6,6 +6,17 @@ class PDFFileStorage(S3Boto3Storage):
     location = "nota-pdfs"
 
 
+class Category(models.Model):
+    name = models.CharField(max_length=100)
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = "Category"
+        verbose_name_plural = "Categories"
+
+
 class PDFFile(models.Model):
     title = models.CharField(max_length=100)
     lyrics = models.TextField(null=True, blank=True)
@@ -13,6 +24,10 @@ class PDFFile(models.Model):
     pdf_file = models.FileField(upload_to="", storage=PDFFileStorage(), blank=True)
     composer = models.CharField(
         max_length=100, blank=False, null=False, default="Anonymous"
+    )
+    year = models.IntegerField(null=True, blank=True)
+    categories = models.ManyToManyField(
+        Category, related_name="pdffiles", blank=True, null=True
     )
 
     def __str__(self):
