@@ -75,6 +75,10 @@ WSGI_APPLICATION = "nota_db.wsgi.application"
 database_url = os.environ.get("DATABASE_URL")
 DATABASES = {"default": dj_database_url.parse(database_url)}
 
+CORS_ALLOWED_ORIGINS = [
+    "https://nota-db-git-main-gitahievans-projects.vercel.app",  # Vercel frontend URL
+    "http://localhost:3000",  # Localhost for local development
+]
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOW_METHODS = [
     "DELETE",
@@ -88,7 +92,7 @@ CORS_ALLOW_METHODS = [
 # Security settings
 SECURE_SSL_REDIRECT = True
 SESSION_COOKIE_SECURE = True
-SESSION_COOKIE_SAMESITE = 'None'
+SESSION_COOKIE_SAMESITE = "None"
 CSRF_COOKIE_SECURE = True
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
