@@ -1,2 +1,7 @@
 env/
 .env
+*.pyc
+__pycache__
+staticfiles/
+media/
+.DS_Store
