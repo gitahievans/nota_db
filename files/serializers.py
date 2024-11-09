@@ -4,7 +4,7 @@ from .models import PDFFile
 class PDFFileSerializer(serializers.ModelSerializer):
     class Meta:
         model = PDFFile
-        fields = ['id', 'title', 'lyrics', 'uploaded_at', 'pdf_file', 'composer']
+        fields = ['id', 'title', 'lyrics', 'uploaded_at', 'pdf_file', 'composer', 'year', 'categories']
         
     def validate_file(self, value):
         if value.content_type != 'application/pdf':
