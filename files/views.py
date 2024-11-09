@@ -4,7 +4,8 @@ from django.http import HttpResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .models import PDFFile
+from .models import PDFFile, Category
+from .serializers import CategorySerializer
 from .serializers import PDFFileSerializer
 from django.http import HttpResponse
 
@@ -29,3 +30,9 @@ class PDFDownloadView(APIView):
         response = HttpResponse(pdf.pdf_file, content_type='application/pdf')
         response['Content-Disposition'] = f'attachemnt; filename="{pdf.title}.pdf"'
         return response
+    
+class CategoryListView(APIView):
+    def get(self, request):
+        categories = Category.objects.all()
+        serializer = CategorySerializer(categories, many=True)
+        return Response(serializer.data)
