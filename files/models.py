@@ -26,9 +26,7 @@ class PDFFile(models.Model):
         max_length=100, blank=False, null=False, default="Anonymous"
     )
     year = models.IntegerField(null=True, blank=True)
-    categories = models.ManyToManyField(
-        Category, related_name="pdffiles", blank=True, null=True
-    )
+    categories = models.ManyToManyField(Category, related_name="pdffiles", blank=True)
 
     def __str__(self):
         return f"{self.title} - {self.composer}"
