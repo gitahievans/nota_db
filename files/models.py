@@ -35,3 +35,4 @@ class PDFFile(models.Model):
         ordering = ["-uploaded_at"]
         verbose_name = "PDF File"
         verbose_name_plural = "PDF Files"
+

@@ -36,3 +36,12 @@ class CategoryListView(APIView):
         categories = Category.objects.all()
         serializer = CategorySerializer(categories, many=True)
         return Response(serializer.data)
+    
+class UpdatePDFView(APIView):
+    def put(self, request, pk):
+        pdf = get_object_or_404(PDFFile, pk=pk)
+        serializer = PDFFileSerializer(pdf, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
