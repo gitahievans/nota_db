@@ -9,7 +9,7 @@ class CategorySerializer(serializers.ModelSerializer):
 
 
 class PDFFileSerializer(serializers.ModelSerializer):
-    categories = CategorySerializer(many=True)
+    categories = CategorySerializer(many=True, required=False)
 
     class Meta:
         model = PDFFile
