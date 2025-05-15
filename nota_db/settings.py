@@ -1,7 +1,8 @@
 from pathlib import Path
 import os
 from dotenv import load_dotenv
-import dj_database_url
+
+# import dj_database_url
 
 load_dotenv()
 
@@ -11,7 +12,10 @@ SECRET_KEY = os.environ.get("SECRET_KEY")
 
 DEBUG = os.environ.get("DEBUG", "False") == "True"
 
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "").split(" ")
+# ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "").split(" ")
+ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+
+print("ALLOWED_HOSTS:", ALLOWED_HOSTS)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -59,23 +63,26 @@ TEMPLATES = [
 WSGI_APPLICATION = "nota_db.wsgi.application"
 
 
-# DATABASES = {
-#     "default": {
-#         "ENGINE": "django.db.backends.postgresql",
-#         "NAME": os.environ.get("DB_NAME"),
-#         "USER": os.environ.get("DB_USER"),
-#         "PASSWORD": os.environ.get("DB_PASSWORD"),
-#         "HOST": os.environ.get("DB_HOST"),
-#         "PORT": os.environ.get("DB_PORT", "5432"),
-#     }
-# }
+# Use this for local development
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ.get("DB_NAME"),
+        "USER": os.environ.get("DB_USER"),
+        "PASSWORD": os.environ.get("DB_PASSWORD"),
+        "HOST": os.environ.get("DB_HOST"),
+        "PORT": os.environ.get("DB_PORT", "5432"),
+    }
+}
 
-database_url = os.environ.get("DATABASE_URL")
-DATABASES = {"default": dj_database_url.parse(database_url)}
+
+# database_url = os.environ.get("DATABASE_URL")
+# DATABASES = {"default": dj_database_url.parse(database_url)}
 
 CORS_ALLOWED_ORIGINS = [
     "https://nota-db-git-main-gitahievans-projects.vercel.app",  # Vercel frontend URL
-    "http://localhost:5173",  # Localhost for local development
+    "http://localhost:9002",  # Localhost for local development
+    "http://127.0.0.1:8000",
 ]
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOW_METHODS = [
@@ -88,10 +95,10 @@ CORS_ALLOW_METHODS = [
 ]
 
 # Security settings
-SECURE_SSL_REDIRECT = True
-SESSION_COOKIE_SECURE = True
-SESSION_COOKIE_SAMESITE = "None"
-CSRF_COOKIE_SECURE = True
+SECURE_SSL_REDIRECT = False
+SESSION_COOKIE_SECURE = False
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SECURE = False
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_HSTS_SECONDS = 31536000  # 1 year
@@ -126,8 +133,10 @@ USE_TZ = True
 
 
 # Static files configuration
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
+STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 
