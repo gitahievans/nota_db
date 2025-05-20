@@ -27,7 +27,8 @@ class PDFFile(models.Model):
     )
     year = models.IntegerField(null=True, blank=True)
     categories = models.ManyToManyField(Category, related_name="pdffiles", blank=True)
-
+    results = models.TextField(null=True, blank=True)
+    processed = models.BooleanField(default=False, blank=True, null=True)
     def __str__(self):
         return f"{self.title} - {self.composer}"
 

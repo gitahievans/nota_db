@@ -8,14 +8,29 @@ from .models import PDFFile, Category
 from .serializers import CategorySerializer
 from .serializers import PDFFileSerializer
 from django.http import HttpResponse
+import logging
+from .tasks import process_score
+
+logger = logging.getLogger(__name__)
 
 class PDFUploadView(APIView):
     def post(self, request):
         serializer = PDFFileSerializer(data=request.data)
-        print(request.data)
+        print(f"incoming data {request.data}")
         if serializer.is_valid():
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            print(f"serializer is valid")
+            score = serializer.save()
+            print(f"Uploaded score ID: {score.id}")
+            process_score.delay(score.id)  
+            return Response(
+                {
+                    "status": "success",
+                    "score_id": score.id,
+                    "message": "PDF uploaded and processing started"
+                },
+                status=status.HTTP_201_CREATED
+            )
+        logger.error(f"Upload failed: {serializer.errors}")
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
 class PDFListView(APIView):

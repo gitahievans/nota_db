@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     "nota_db",
     "files",
     "corsheaders",
+    "rest_framework",
 ]
 
 
@@ -152,7 +153,9 @@ AWS_S3_ENDPOINT_URL = (
     "https://80b4ea6aaa8ed2b91c16beb44843b4ed.r2.cloudflarestorage.com"
 )
 
-DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
+# Use the custom storage class
+DEFAULT_FILE_STORAGE = "files.storage.PDFFileStorage"
+
 MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.r2.cloudflarestorage.com/"
 
 CELERY_BROKER_URL = "redis://redis:6379/0"
@@ -162,3 +165,19 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "Africa/Nairobi"
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "loggers": {
+        "": {
+            "handlers": ["console"],
+            "level": "INFO",
+        },
+    },
+}

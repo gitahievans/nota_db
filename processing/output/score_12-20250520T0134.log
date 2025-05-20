@@ -1,0 +1,75 @@
+2025-05-20 01:34:36,624 INFO [score_12]                 Book.java:562  | 1 sheet in /input/score_12.pdf
+2025-05-20 01:34:36,865 INFO []                 Book.java:2531 | Stored /book.xml
+2025-05-20 01:34:36,866 INFO []                 Book.java:2491 | Book stored as /output/score_12.omr
+2025-05-20 01:34:36,879 INFO []                 Book.java:1933 | Book reaching PAGE on sheets:[#1]
+2025-05-20 01:34:36,881 INFO [score_12]       StepMonitoring.java:98   | LOAD
+2025-05-20 01:34:37,125 WARN [score_12]      PostScriptTable.java:74   | No PostScript name data is provided for the font null
+2025-05-20 01:34:37,184 INFO [score_12] FileSystemFontProvider.java:665  | 22 new font files found, font cache will be re-built
+2025-05-20 01:34:37,184 INFO [score_12] FileSystemFontProvider.java:369  | Building on-disk font cache, this may take a while
+2025-05-20 01:34:37,291 INFO [score_12] FileSystemFontProvider.java:372  | Finished building on-disk font cache, found 22 fonts
+2025-05-20 01:34:37,292 WARN [score_12]       PDTrueTypeFont.java:148  | Using fallback font LiberationSans for TimesNewRomanPSMT
+2025-05-20 01:34:37,345 WARN [score_12]       PDTrueTypeFont.java:148  | Using fallback font LiberationSans for Algerian
+2025-05-20 01:34:37,348 WARN [score_12]       PDTrueTypeFont.java:148  | Using fallback font LiberationSans for TrebuchetMS-Italic
+2025-05-20 01:34:37,460 WARN [score_12]       PDTrueTypeFont.java:148  | Using fallback font LiberationSans for TwCenMT-CondensedExtraBold
+2025-05-20 01:34:37,478 INFO [score_12]            SheetStub.java:1268 | Loaded image #1 2550x3299 from /input/score_12.pdf
+2025-05-20 01:34:37,483 INFO [score_12]       StepMonitoring.java:98   | BINARY
+2025-05-20 01:34:38,111 INFO [score_12]       StepMonitoring.java:98   | SCALE
+2025-05-20 01:34:38,138 INFO [score_12]         ScaleBuilder.java:241  | Beam  guessed height:  9 -- 0.50 of 18 interline
+2025-05-20 01:34:38,140 INFO [score_12]         ScaleBuilder.java:264  | Beam measured height:  9 -- 0.31 of [5..18] range at 350% of needed quorum
+2025-05-20 01:34:38,141 INFO [score_12]            ScaleStep.java:65   | Scale{ interline(17,18,18) line(1,1,2) beam(9)}
+2025-05-20 01:34:38,143 INFO [score_12]       StepMonitoring.java:98   | GRID
+2025-05-20 01:34:39,082 INFO [score_12]       LinesRetriever.java:1500 | Global slope: 0.00000
+2025-05-20 01:34:39,102 INFO [score_12]    ClustersRetriever.java:328  | Retrieved raw line clusters: 8 of sizes [5] with interline(17,18,18)
+2025-05-20 01:34:39,208 INFO [score_12]            PeakGraph.java:310  | Systems: #1[1, 2] #2[3, 4] #3[5, 6] #4[7] #5[8]
+2025-05-20 01:34:39,272 INFO [score_12]        BarsRetriever.java:1304 | System#1
+2025-05-20 01:34:39,273 INFO [score_12]        BarsRetriever.java:1307 |    PartGroup{bracket number:1 barline:false staves:1-2}
+2025-05-20 01:34:39,274 INFO [score_12]        BarsRetriever.java:1304 | System#2
+2025-05-20 01:34:39,275 INFO [score_12]        BarsRetriever.java:1307 |    PartGroup{bracket number:1 barline:false staves:3-4}
+2025-05-20 01:34:39,275 INFO [score_12]        BarsRetriever.java:1304 | System#3
+2025-05-20 01:34:39,275 INFO [score_12]        BarsRetriever.java:1307 |    PartGroup{bracket number:1 barline:true staves:5-6}
+2025-05-20 01:34:39,568 INFO [score_12]        SystemManager.java:779  | 2 parts along 5 systems
+2025-05-20 01:34:39,573 INFO [score_12]                 Book.java:545  | Created scores: [{Score 1}]
+2025-05-20 01:34:39,576 INFO [score_12]       StepMonitoring.java:98   | HEADERS
+2025-05-20 01:34:40,036 INFO [score_12]      BasicClassifier.java:277  | Classifier loaded XML norms.
+2025-05-20 01:34:40,039 INFO [score_12]   AbstractClassifier.java:396  | Classifier data loaded from default uri jar:file:/app/audiveris.jar!/res/basic-classifier.zip
+2025-05-20 01:34:40,594 INFO [score_12]       StepMonitoring.java:98   | STEM_SEEDS
+2025-05-20 01:34:40,641 INFO [score_12]        StemSeedsStep.java:86   | stem(2 max:4)
+2025-05-20 01:34:40,724 INFO [score_12]       StepMonitoring.java:98   | BEAMS
+2025-05-20 01:34:43,485 INFO [score_12]       StepMonitoring.java:98   | LEDGERS
+2025-05-20 01:34:43,905 INFO [score_12]       StepMonitoring.java:98   | HEADS
+2025-05-20 01:34:46,605 INFO [score_12]        HeadSeedTally.java:235  | Scale information: HeadSeeds{NOTEHEAD_BLACK[L:0.8,R:1.0]}
+2025-05-20 01:34:46,606 INFO [score_12]       StepMonitoring.java:98   | STEMS
+2025-05-20 01:34:47,775 INFO [score_12]       StepMonitoring.java:98   | REDUCTION
+2025-05-20 01:34:47,877 INFO [score_12]        ReductionStep.java:105  | Stems free length median value: 61 pixels, 3.4 interlines
+2025-05-20 01:34:47,883 INFO [score_12]       StepMonitoring.java:98   | CUE_BEAMS
+2025-05-20 01:34:47,884 INFO [score_12]         CueBeamsStep.java:81   | Step CUE_BEAMS is skipped because small heads switch is off
+2025-05-20 01:34:47,885 INFO [score_12]       StepMonitoring.java:98   | TEXTS
+2025-05-20 01:34:47,980 WARN [score_12]         TesseractOCR.java:335  | The collection of supported languages is empty
+2025-05-20 01:34:47,981 INFO [score_12]              OcrUtil.java:106  | Missing support for 'eng' language(s)
+2025-05-20 01:34:47,990 INFO [score_12]       StepMonitoring.java:98   | MEASURES
+2025-05-20 01:34:48,004 INFO [score_12]                 Page.java:307  | 28 raw measures: [7 in system#1, 6 in system#2, 6 in system#3, 5 in system#4, 4 in system#5]
+2025-05-20 01:34:48,005 INFO [score_12]       StepMonitoring.java:98   | CHORDS
+2025-05-20 01:34:48,021 INFO [score_12]       StepMonitoring.java:98   | CURVES
+2025-05-20 01:34:50,951 INFO [score_12]         SlursBuilder.java:240  | Slurs: 29
+2025-05-20 01:34:50,996 INFO [score_12]      SegmentsBuilder.java:155  | Segments: 46
+2025-05-20 01:34:51,002 INFO [score_12]       StepMonitoring.java:98   | SYMBOLS
+2025-05-20 01:34:52,572 INFO [score_12]       StepMonitoring.java:98   | LINKS
+2025-05-20 01:34:52,628 INFO [score_12]        SymbolsLinker.java:257  | No chord linked to OctaveShiftInter#11751{(0.223) staff:7 QUINDICESIMA BASSA}
+2025-05-20 01:34:52,632 INFO [score_12]        SymbolsLinker.java:257  | No chord linked to OctaveShiftInter#11968{(0.223) staff:8 QUINDICESIMA ALTA}
+2025-05-20 01:34:52,633 INFO [score_12]        SymbolsLinker.java:257  | No chord linked to OctaveShiftInter#12009{(0.228) staff:8 QUINDICESIMA ALTA}
+2025-05-20 01:34:52,637 INFO [score_12]       StepMonitoring.java:98   | RHYTHMS
+2025-05-20 01:34:52,708 INFO [score_12]       StepMonitoring.java:98   | PAGE
+2025-05-20 01:34:52,718 INFO [score_12]                 Book.java:2550 | Book{score_12} storing
+2025-05-20 01:34:52,856 INFO [score_12]                 Book.java:2531 | Stored /book.xml
+2025-05-20 01:34:53,036 INFO [score_12]           DataHolder.java:348  | Stored /sheet#1/BINARY.png
+2025-05-20 01:34:53,499 INFO [score_12]                Sheet.java:1562 | Stored /sheet#1/sheet#1.xml
+2025-05-20 01:34:53,500 INFO [score_12]                 Book.java:2491 | Book stored as /output/score_12.omr
+2025-05-20 01:34:53,521 INFO [score_12]            SheetStub.java:1644 | Disposed sheet
+2025-05-20 01:34:53,574 INFO [score_12]                 Book.java:2018 | End of Stub#1 memory: 39,444,752
+2025-05-20 01:34:53,575 INFO [score_12]                 Book.java:2025 | Book processed.
+2025-05-20 01:34:54,025 INFO [score_12]            SheetStub.java:995  | Loaded /sheet#1/sheet#1.xml
+2025-05-20 01:34:54,306 INFO [score_12]      PartwiseBuilder.java:2661 | Exporting sheet(s): [#1]
+2025-05-20 01:34:54,320 INFO [score_12]                 Part.java:351  | Sheet#1 System#4 Part#2{ staves[7] configs:[5]} dummyPart id: 1
+2025-05-20 01:34:54,323 INFO [score_12]                 Part.java:351  | Sheet#1 System#5 Part#2{ staves[8] configs:[5]} dummyPart id: 1
+2025-05-20 01:34:54,405 INFO [score_12]        ScoreExporter.java:164  | Score score_12 exported to /output/score_12.mxl
+2025-05-20 01:34:54,451 INFO [score_12]                Score.java:181  | Closing {Score 1}

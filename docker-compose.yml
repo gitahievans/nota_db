@@ -31,8 +31,11 @@ services:
 
   celery:
     build: .
+    command: celery -A nota_db worker --loglevel=info
     volumes:
       - .:/app
+      - ./processing:/processing  # Keep only the host volume mapping
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - db
       - redis
@@ -40,11 +43,13 @@ services:
       - .env
     environment:
       - DEBUG=1
+    entrypoint: ["/app/entrypoint.celery.sh"]
 
   web:
     build: .
     volumes:
       - .:/app
+      - ./processing:/processing  # Keep only the host volume mapping
     ports:
       - "8000:8000"
     depends_on:
@@ -55,9 +60,9 @@ services:
     environment:
       - DEBUG=1
     command: python manage.py runserver 0.0.0.0:8000
-    entrypoint: []
-     
+    entrypoint: ["/app/entrypoint.web.sh"]
 
 volumes:
   postgres_data:
   redis_data:
+  # Remove processing_data

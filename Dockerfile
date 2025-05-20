@@ -15,24 +15,14 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 # Copy project files
 COPY . .
 
+# Collect static files
 RUN python manage.py collectstatic --noinput
 
+# Create input and output directories and set permissions
+RUN mkdir -p /processing/input /processing/output
 
-# *****************
-# Create a non-root user 'celeryuser'
-RUN addgroup --system celerygroup && adduser --system --ingroup celerygroup celeryuser
+# Make entrypoint scripts executable
+RUN chmod +x /app/entrypoint.web.sh /app/entrypoint.celery.sh /app/entrypoint.prod.sh
 
-# Give ownership of the app folder to celeryuser
-RUN chown -R celeryuser:celerygroup /app
-
-# Switch to celeryuser
-USER celeryuser
-# *****************
-
-# Run the Django server (optional for dev)
+# Run the Django server (optional for dev; overridden by docker-compose.yml)
 CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
-
-RUN chmod +x /app/entrypoint.prod.sh
-
-# Set entrypoint
-ENTRYPOINT ["/app/entrypoint.prod.sh"]
