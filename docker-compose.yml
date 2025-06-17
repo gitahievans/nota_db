@@ -31,14 +31,24 @@ services:
 
   celery:
     build: .
+    container_name: nota_celery
     command: celery -A nota_db worker --loglevel=info
     volumes:
-      - .:/app
-      - ./processing:/processing  # Keep only the host volume mapping
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ./files:/app/files
+      - ./nota_db:/app/nota_db
+      - ./entrypoint.web.sh:/app/entrypoint.web.sh
+      - ./entrypoint.celery.sh:/app/entrypoint.celery.sh
+      - ./entrypoint.prod.sh:/app/entrypoint.prod.sh
+      - ./manage.py:/app/manage.py
+      - ./requirements.txt:/app/requirements.txt
+      - ./static:/app/static
+      - ./staticfiles:/app/staticfiles
+      - processing_data:/processing
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -47,14 +57,25 @@ services:
 
   web:
     build: .
+    container_name: nota_web
     volumes:
-      - .:/app
-      - ./processing:/processing  # Keep only the host volume mapping
+      - ./files:/app/files
+      - ./nota_db:/app/nota_db
+      - ./entrypoint.web.sh:/app/entrypoint.web.sh
+      - ./entrypoint.celery.sh:/app/entrypoint.celery.sh
+      - ./entrypoint.prod.sh:/app/entrypoint.prod.sh
+      - ./manage.py:/app/manage.py
+      - ./requirements.txt:/app/requirements.txt
+      - ./static:/app/static
+      - ./staticfiles:/app/staticfiles
+      - processing_data:/processing
     ports:
       - "8000:8000"
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -65,4 +86,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  # Remove processing_data
+  processing_data:

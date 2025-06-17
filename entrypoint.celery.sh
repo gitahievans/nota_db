@@ -1,3 +1,4 @@
 #!/bin/bash
-# No permission fixes needed as running as root
+set -e
+# Start Celery worker
 exec "$@"

@@ -1,148 +1,184 @@
-import os
-import logging
+import json
 from celery import shared_task
+import boto3
+import os
+import subprocess
+from music21 import converter, stream, chord, tempo, meter
 from django.conf import settings
-from .models import PDFFile, PDFFileStorage
-import docker
-from music21 import converter, tempo, chord
+from .models import PDFFile
+import logging
 
 logger = logging.getLogger(__name__)
+
 
 @shared_task
 def process_score(score_id):
     try:
-        # Step 1: Get the PDFFile object
+        # Fetch the PDF file record
         score = PDFFile.objects.get(id=score_id)
-        pdf_path = score.pdf_file.name
-        logger.info(f"Processing score {score_id}: {pdf_path}")
+        logger.info(f"Processing score ID: {score_id}")
 
-        # Use the custom storage class
-        storage = PDFFileStorage()
-        logger.info(f"Using storage: {storage.__class__.__name__}")
-        logger.info(f"Storage location: {storage.location}")
+        # Download PDF from Cloudflare R2
+        s3_client = boto3.client(
+            "s3",
+            endpoint_url=settings.AWS_S3_ENDPOINT_URL,
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        )
+        file_key = f"nota-pdfs/{os.path.basename(score.pdf_file.name)}"
+        pdf_path = f"/processing/input/{os.path.basename(score.pdf_file.name)}"
+        os.makedirs(os.path.dirname(pdf_path), exist_ok=True)
+        logger.info(
+            f"Downloading file from bucket {settings.AWS_STORAGE_BUCKET_NAME} with key {file_key}"
+        )
+        s3_client.download_file(settings.AWS_STORAGE_BUCKET_NAME, file_key, pdf_path)
+        logger.info(f"Downloaded PDF to {pdf_path}")
 
-        # Check if file exists in R2
-        full_path = f"{storage.location}/{pdf_path}"
-        if not storage.exists(pdf_path):
-            logger.error(f"File not found in R2 at {full_path}")
-            score.results = f"File not found in R2 at {full_path}"
-            score.processed = True
-            score.save()
-            return
-
-        logger.info(f"File found in R2 at {pdf_path}")
-
-        # Step 2: Download PDF to /app/processing/input directory
-        input_dir = "/app/processing/input"  # Adjusted to match WORKDIR /app
-        os.makedirs(input_dir, exist_ok=True)
-        local_pdf_path = f"{input_dir}/score_{score_id}.pdf"
-        try:
-            with storage.open(pdf_path, 'rb') as pdf_file:
-                with open(local_pdf_path, 'wb') as local_file:
-                    local_file.write(pdf_file.read())
-            logger.info(f"Downloaded PDF to {local_pdf_path}")
-        except Exception as e:
-            logger.error(f"Failed to download PDF from R2: {str(e)}")
-            score.results = f"Failed to download PDF: {str(e)}"
-            score.processed = True
-            score.save()
-            return
-
-        # Debug: Verify the file exists in the input directory
-        if not os.path.exists(local_pdf_path):
-            logger.error(f"Downloaded PDF not found at {local_pdf_path}")
-            logger.info(f"Input directory contents: {os.listdir(input_dir)}")
-            score.results = f"Downloaded PDF not found at {local_pdf_path}"
-            score.processed = True
-            score.save()
-            return
-        logger.info(f"Confirmed PDF exists at {local_pdf_path}")
-        logger.info(f"Input directory contents: {os.listdir(input_dir)}")
-
-        # Step 3: Run Audiveris in a Docker container
-        output_dir = "/app/processing/output"  # Adjusted to match WORKDIR /app
-        os.makedirs(output_dir, exist_ok=True)
-        musicxml_path = f"{output_dir}/score_{score_id}.mxl"
-        try:
-            client = docker.from_env()
-            volumes = {
-                input_dir: {'bind': '/input', 'mode': 'rw'},
-                output_dir: {'bind': '/output', 'mode': 'rw'},
-            }
-            command = f"/input/score_{score_id}.pdf"
-            logger.info(f"Running Audiveris with command: {command}, volumes: {volumes}")
-            container = client.containers.run(
-                image="gitahievans/audiveris:latest",
-                name=f"audiveris_{score_id}",
-                command=command,
-                volumes=volumes,
-                remove=True,
-                stdout=True,
-                stderr=True
+        # Verify working directory
+        audiveris_dir = "/app/audiveris"
+        if not os.path.exists(audiveris_dir):
+            logger.error(f"Audiveris directory {audiveris_dir} does not exist")
+            raise FileNotFoundError(
+                f"Audiveris directory {audiveris_dir} does not exist"
             )
-            logger.info(f"Audiveris output: {container.decode('utf-8')}")
-            log_file = f"{output_dir}/audiveris.log"
-            if os.path.exists(log_file):
-                with open(log_file, 'r') as f:
-                    logger.info(f"Audiveris log: {f.read()}")
+        logger.info(f"Audiveris directory contents: {os.listdir(audiveris_dir)}")
+
+        # Run Audiveris to convert PDF to MusicXML
+        mxl_path = f"/processing/output/{score.id}"
+        audiveris_cmd = [
+            "/opt/gradle-8.7/bin/gradle",
+            "run",
+            "-PjvmLineArgs=-Xmx3g",
+            f"-PcmdLineArgs=-batch,-export,-output,{mxl_path},--,{pdf_path}",
+        ]
+        logger.info(f"Running Audiveris command: {' '.join(audiveris_cmd)}")
+        try:
+            result = subprocess.run(
+                audiveris_cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=audiveris_dir,
+            )
+            logger.info(f"Audiveris output: {result.stdout}")
+            logger.info(f"Converted PDF to MusicXML at {mxl_path}")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Audiveris failed: {e.stderr}")
+            raise
+
+        # Find the generated MusicXML file
+        mxl_files = [f for f in os.listdir(mxl_path) if f.endswith(".mxl")]
+        if not mxl_files:
+            raise Exception("No MusicXML files generated")
+        mxl_file = os.path.join(mxl_path, mxl_files[0])
+        logger.info(f"Found MusicXML file: {mxl_file}")
+
+        # Analyze MusicXML with music21
+        score_stream = converter.parse(mxl_file)
+        analysis = {
+            "key": None,
+            "parts": [],
+            "chords": [],
+            "tempo": None,
+            "time_signature": None,
+        }
+
+        # Extract key
+        try:
+            analysis["key"] = str(score_stream.analyze("key"))
+            logger.info(f"Detected key: {analysis['key']}")
+        except Exception as e:
+            logger.warning(f"Key analysis failed: {str(e)}")
+            analysis["key"] = f"Error: {str(e)}"
+
+        # Extract part names safely
+        try:
+            if not score_stream.parts:
+                analysis["parts"] = ["No parts detected"]
+                logger.warning("No parts found in MusicXML")
             else:
-                logger.warning(f"Audiveris log file not found at {log_file}")
+                for part in score_stream.parts:
+                    part_name = getattr(part, "partName", None)
+                    analysis["parts"].append(part_name if part_name else "Unnamed Part")
+                    logger.info(
+                        f"Part ID: {part.id}, PartName: {getattr(part, 'partName', 'None')}"
+                    )
+            logger.info(f"Detected parts: {analysis['parts']}")
         except Exception as e:
-            logger.error(f"Audiveris failed: {str(e)}")
-            score.results = f"Audiveris failed: {str(e)}"
-            score.processed = True
-            score.save()
-            return
+            logger.error(f"Part analysis failed: {str(e)}")
+            analysis["parts"] = [f"Error: {str(e)}"]
 
-        # Step 4: Analyze MusicXML with music21
-        if not os.path.exists(musicxml_path):
-            logger.error(f"MusicXML file not found at {musicxml_path}")
-            output_files = os.listdir(output_dir) if os.path.exists(output_dir) else []
-            logger.info(f"Output directory contents: {output_files}")
-            score.results = f"MusicXML generation failed. Output files: {output_files}"
-            score.processed = True
-            score.save()
-            return
-
+        # Extract chords
         try:
-            score_stream = converter.parse(musicxml_path)
-            analysis = {}
-            key_analysis = score_stream.analyze('key')
-            analysis['key'] = str(key_analysis)
-            tempo_marks = score_stream.flatten().getElementsByClass(tempo.MetronomeMark)
-            analysis['tempo'] = tempo_marks[0].number if tempo_marks else None
             chords = []
-            for c in score_stream.flatten().getElementsByClass(chord.Chord):
-                chords.append(c.pitchedCommonName)
-            analysis['chords'] = chords[:10]
-            logger.info(f"music21 analysis: {analysis}")
-            score.results = str(analysis)
-            score.processed = True
-            score.save()
-            logger.info(f"Saved analysis for score {score_id}")
+            for part in score_stream.parts:
+                chordified = part.chordify()  # Combine notes into chords
+                for c in chordified.recurse().getElementsByClass(chord.Chord):
+                    chord_name = c.pitchedCommonName if c.isChord else "N/A"
+                    chords.append({"pitch": chord_name, "offset": float(c.offset)})
+            analysis["chords"] = chords[:10]  # Limit to first 10 for brevity
+            logger.info(f"Detected chords: {analysis['chords']}")
         except Exception as e:
-            logger.error(f"music21 analysis failed: {str(e)}")
-            score.results = f"music21 analysis failed: {str(e)}"
-            score.processed = True
-            score.save()
-            return
+            logger.error(f"Chord analysis failed: {str(e)}")
+            analysis["chords"] = [f"Error: {str(e)}"]
 
-        # Clean up temporary files
+        # Extract tempo
         try:
-            os.remove(local_pdf_path)
-            if os.path.exists(musicxml_path):
-                os.remove(musicxml_path)
-            for file in os.listdir(output_dir):
-                os.remove(os.path.join(output_dir, file))
+            metronome = (
+                score_stream.recurse().getElementsByClass(tempo.MetronomeMark).first()
+            )
+            if metronome:
+                analysis["tempo"] = {
+                    "text": metronome.text,
+                    "bpm": (
+                        float(metronome.getQuarterBPM())
+                        if metronome.getQuarterBPM()
+                        else None
+                    ),
+                }
+            else:
+                analysis["tempo"] = "No tempo marking found"
+            logger.info(f"Detected tempo: {analysis['tempo']}")
         except Exception as e:
-            logger.warning(f"Failed to clean up files: {str(e)}")
+            logger.error(f"Tempo analysis failed: {str(e)}")
+            analysis["tempo"] = f"Error: {str(e)}"
+
+        # Extract time signature
+        try:
+            time_sig = (
+                score_stream.recurse().getElementsByClass(meter.TimeSignature).first()
+            )
+            analysis["time_signature"] = (
+                str(time_sig.ratioString) if time_sig else "No time signature found"
+            )
+            logger.info(f"Detected time signature: {analysis['time_signature']}")
+        except Exception as e:
+            logger.error(f"Time signature analysis failed: {str(e)}")
+            analysis["time_signature"] = f"Error: {str(e)}"
+
+        # Log MusicXML structure for debugging
+        logger.info(f"Number of parts in MusicXML: {len(score_stream.parts)}")
+        for i, part in enumerate(score_stream.parts):
+            logger.info(
+                f"Part {i+1} ID: {part.id}, PartName: {getattr(part, 'partName', 'None')}"
+            )
+
+        # Save results to database as valid JSON
+        score.results = json.dumps(analysis)  # Serialize to JSON string
+        score.processed = bool(
+            analysis["key"]
+            and analysis["parts"]
+            and analysis["chords"]
+            and analysis["tempo"]
+            and analysis["time_signature"]
+            and "Error" not in str(analysis)
+        )
+        score.save()
+        logger.info(f"Saved analysis for score ID: {score_id}")
 
     except Exception as e:
-        logger.error(f"Error processing score {score_id}: {str(e)}")
-        try:
-            score = PDFFile.objects.get(id=score_id)
-            score.results = f"Error: {str(e)}"
-            score.processed = True
-            score.save()
-        except Exception as save_e:
-            logger.error(f"Failed to save error state for score {score_id}: {save_e}")
+        logger.error(f"Error processing score ID {score_id}: {str(e)}")
+        score.processed = False
+        score.results = json.dumps({"error": str(e)})  # Save error as valid JSON
+        score.save()
+        raise
