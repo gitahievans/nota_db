@@ -16,6 +16,8 @@ ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "127.0.0.1,localhost").split(","
 TEMP_STORAGE_DIR = Path("/tmp/nota")
 TEMP_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
+CLEANUP_DELAY_SECONDS = 30
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
