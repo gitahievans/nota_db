@@ -1,6 +1,6 @@
 from django.db import models
 from storages.backends.s3boto3 import S3Boto3Storage
-
+from django.contrib.postgres.fields import JSONField
 
 class PDFFileStorage(S3Boto3Storage):
     location = "nota-pdfs"
@@ -27,8 +27,11 @@ class PDFFile(models.Model):
     )
     year = models.IntegerField(null=True, blank=True)
     categories = models.ManyToManyField(Category, related_name="pdffiles", blank=True)
-    results = models.TextField(null=True, blank=True)
+    results = models.JSONField(null=True, blank=True)
     processed = models.BooleanField(default=False, blank=True, null=True)
+    musicxml_url = models.URLField(max_length=2000, null=True, blank=True)
+    midi_url = models.URLField(max_length=2000, null=True, blank=True)
+
     def __str__(self):
         return f"{self.title} - {self.composer}"
 
@@ -36,4 +39,3 @@ class PDFFile(models.Model):
         ordering = ["-uploaded_at"]
         verbose_name = "PDF File"
         verbose_name_plural = "PDF Files"
-
