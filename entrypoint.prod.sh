@@ -9,5 +9,6 @@ python manage.py migrate --noinput
 
 echo "Starting Celery worker..."
 celery -A nota_db worker --loglevel=info
-# echo "Starting gunicorn..."
-# exec gunicorn soundleaf.wsgi:application --bind 0.0.0.0:8000 --workers 9
+
+echo "Starting gunicorn..."
+exec gunicorn nota_db.wsgi:application --bind 0.0.0.0:8000 --workers 9
