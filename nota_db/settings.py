@@ -1,8 +1,7 @@
 from pathlib import Path
 import os
 from dotenv import load_dotenv
-
-# import dj_database_url
+import dj_database_url
 
 load_dotenv()
 
@@ -10,12 +9,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get("SECRET_KEY")
 
-DEBUG = os.environ.get("DEBUG", "False") == "True"
+DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
 
-# ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "").split(" ")
-ALLOWED_HOSTS = ["127.0.0.1", "localhost", "0.0.0.0"]
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
 
-print("ALLOWED_HOSTS:", ALLOWED_HOSTS)
+TEMP_STORAGE_DIR = Path("/tmp/nota")
+TEMP_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -64,27 +63,36 @@ TEMPLATES = [
 WSGI_APPLICATION = "nota_db.wsgi.application"
 
 
-# Use this for local development
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("DB_NAME"),
-        "USER": os.environ.get("DB_USER"),
-        "PASSWORD": os.environ.get("DB_PASSWORD"),
-        "HOST": os.environ.get("DB_HOST"),
-        "PORT": os.environ.get("DB_PORT", "5432"),
+# Database configuration
+if DEBUG:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("DB_NAME"),
+            "USER": os.environ.get("DB_USER"),
+            "PASSWORD": os.environ.get("DB_PASSWORD"),
+            "HOST": os.environ.get("DB_HOST"),
+            "PORT": os.environ.get("DB_PORT", "5432"),
+        }
     }
-}
-
-
-# database_url = os.environ.get("DATABASE_URL")
-# DATABASES = {"default": dj_database_url.parse(database_url)}
+else:
+    database_url = os.environ.get("DATABASE_URL")
+    DATABASES = {
+        "default": dj_database_url.parse(
+            database_url, conn_max_age=600, ssl_require=False
+        )
+    }
 
 CORS_ALLOWED_ORIGINS = [
-    "https://nota-db-git-main-gitahievans-projects.vercel.app",  # Vercel frontend URL
-    "http://localhost:9002",  # Localhost for local development
+    "https://nota-db-git-main-gitahievans-projects.vercel.app",
+    "http://localhost:9002",
     "http://127.0.0.1:8000",
 ]
+if not DEBUG:
+    production_url = os.environ.get("PRODUCTION_URL", "")
+    if production_url and production_url.startswith(("http://", "https://")):
+        CORS_ALLOWED_ORIGINS.append(production_url)
+
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOW_METHODS = [
     "DELETE",
@@ -96,15 +104,17 @@ CORS_ALLOW_METHODS = [
 ]
 
 # Security settings
-SECURE_SSL_REDIRECT = False
-SESSION_COOKIE_SECURE = False
+SECURE_SSL_REDIRECT = (
+    False  # Disable in development, will be handled by Caddy in production
+)
+SESSION_COOKIE_SECURE = False  # Disable in development, will be handled in production
+CSRF_COOKIE_SECURE = False  # Disable in development, will be handled in production
 SESSION_COOKIE_SAMESITE = "Lax"
-CSRF_COOKIE_SECURE = False
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
-SECURE_HSTS_SECONDS = 31536000  # 1 year
-SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-SECURE_HSTS_PRELOAD = True
+SECURE_HSTS_SECONDS = 0  # Disable HSTS in development
+SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+SECURE_HSTS_PRELOAD = False
 X_FRAME_OPTIONS = "DENY"
 
 
@@ -135,8 +145,7 @@ USE_TZ = True
 
 # Static files configuration
 STATIC_URL = "/static/"
-# STATICFILES_DIRS = [BASE_DIR / "static"]
-STATIC_ROOT = BASE_DIR / "staticfiles"
+STATIC_ROOT = "/app/staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 
@@ -156,8 +165,13 @@ AWS_S3_ENDPOINT_URL = (
 # Use the custom storage class
 DEFAULT_FILE_STORAGE = "files.storage.PDFFileStorage"
 
-MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.r2.cloudflarestorage.com/"
+# Media files configuration
+MEDIA_URL = (
+    f"https://{os.environ.get('AWS_STORAGE_BUCKET_NAME')}.r2.cloudflarestorage.com/"
+)
+MEDIA_ROOT = BASE_DIR / "media" if DEBUG else None
 
+# Celery configuration
 CELERY_BROKER_URL = "redis://redis:6379/0"
 CELERY_RESULT_BACKEND = "redis://redis:6379/0"
 CELERY_ACCEPT_CONTENT = ["json"]
