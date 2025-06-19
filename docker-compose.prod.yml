@@ -4,7 +4,7 @@ services:
     image: postgres:16
     container_name: nota_db
     env_file:
-      - .env
+      - .env.prod
     environment:
       POSTGRES_DB: nota_db        
       POSTGRES_USER: ${DB_USER}       
@@ -34,28 +34,19 @@ services:
     build: .
     container_name: nota_celery
     volumes:
-      - ./files:/app/files
-      - ./nota_db:/app/nota_db
-      - ./entrypoint.web.sh:/app/entrypoint.web.sh
-      - ./entrypoint.celery.sh:/app/entrypoint.celery.sh
-      - ./entrypoint.prod.sh:/app/entrypoint.prod.sh
-      - ./manage.py:/app/manage.py
-      - ./requirements.txt:/app/requirements.txt
-      - ./static:/app/static
-      - ./staticfiles:/app/staticfiles
-      - ./output:/app/output  # Add this line for MusicXML files
-      - nota_tmp:/tmp/nota
       - processing_data:/processing
+      - nota_tmp:/tmp/nota
+      - ./staticfiles:/app/staticfiles
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
     env_file:
-      - .env
+      - .env.prod
     environment:
-      - DJANGO_ENV=development
-      - DEBUG=${DEBUG:-1}
+      - DJANGO_ENV=production
+      - DEBUG=${DEBUG:-0}
     entrypoint: ["/app/entrypoint.celery.sh"]
     command: ["celery", "-A", "nota_db", "worker", "--loglevel=info"]
 
@@ -63,18 +54,9 @@ services:
     build: .
     container_name: nota_web
     volumes:
-      - ./files:/app/files
-      - ./nota_db:/app/nota_db
-      - ./entrypoint.web.sh:/app/entrypoint.web.sh
-      - ./entrypoint.celery.sh:/app/entrypoint.celery.sh
-      - ./entrypoint.prod.sh:/app/entrypoint.prod.sh
-      - ./manage.py:/app/manage.py
-      - ./requirements.txt:/app/requirements.txt
-      - ./static:/app/static
-      - ./staticfiles:/app/staticfiles
-      - ./output:/app/output  # Add this line for MusicXML files
-      - nota_tmp:/tmp/nota
       - processing_data:/processing
+      - nota_tmp:/tmp/nota
+      - ./staticfiles:/app/staticfiles
     ports:
       - "8000:8000"
     depends_on:
@@ -83,11 +65,11 @@ services:
       redis:
         condition: service_healthy
     env_file:
-      - .env
+      - .env.prod
     environment:
-      - DJANGO_ENV=development
-      - DEBUG=${DEBUG:-1}
-    entrypoint: ["/app/entrypoint.web.sh"]
+      - DJANGO_ENV=production
+      - DEBUG=${DEBUG:-0}
+    entrypoint: ["/app/entrypoint.prod.sh"]
 
 volumes:
   postgres_data:

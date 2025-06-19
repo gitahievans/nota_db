@@ -104,6 +104,112 @@ def process_score(score_id):
             logger.error(f"Failed to rename MusicXML file: {str(e)}")
             raise
 
+        # Create XML version for serving via API
+        xml_output_path = None
+        try:
+            import zipfile
+
+            # Create XML file for serving
+            xml_output_path = os.path.join(mxl_path, "output.xml")
+
+            # Extract XML from MXL file
+            with zipfile.ZipFile(output_mxl_path, "r") as mxl_zip:
+                file_list = mxl_zip.namelist()
+                logger.info(f"Files in MXL for XML extraction: {file_list}")
+
+                # Find the main XML file
+                xml_files = [
+                    f for f in file_list if f.endswith(".xml") and "/" not in f
+                ]
+                if not xml_files:
+                    xml_files = [f for f in file_list if f.endswith(".xml")]
+
+                if not xml_files:
+                    raise Exception("No XML file found in MXL archive for serving")
+
+                xml_filename = xml_files[0]
+                logger.info(f"Extracting XML for serving: {xml_filename}")
+
+                # Extract and save the XML content
+                with mxl_zip.open(xml_filename) as xml_file:
+                    xml_content = xml_file.read()
+                    with open(xml_output_path, "wb") as output_file:
+                        output_file.write(xml_content)
+
+            logger.info(f"Created XML file for serving at: {xml_output_path}")
+
+        except Exception as e:
+            logger.error(f"Failed to create XML file for serving: {str(e)}")
+            xml_output_path = None
+
+        # Copy the MusicXML file to the output directory (mounted to host)
+        try:
+            # Create output directory if it doesn't exist
+            output_dir = os.path.join(settings.BASE_DIR, "output")
+            os.makedirs(output_dir, exist_ok=True)
+
+            # Extract XML from MXL file and save as XML
+            import zipfile
+
+            destination_path = os.path.join(output_dir, f"output_{score_id}.xml")
+
+            logger.info(f"About to extract and copy MusicXML file:")
+            logger.info(f"  Source MXL: {output_mxl_path}")
+            logger.info(f"  Source exists: {os.path.exists(output_mxl_path)}")
+            logger.info(f"  Output directory: {output_dir}")
+            logger.info(f"  Output directory exists: {os.path.exists(output_dir)}")
+            logger.info(
+                f"  Output directory writable: {os.access(output_dir, os.W_OK)}"
+            )
+            logger.info(f"  Destination XML: {destination_path}")
+
+            # Extract XML from MXL (which is a ZIP file)
+            with zipfile.ZipFile(output_mxl_path, "r") as mxl_zip:
+                # List all files in the MXL
+                file_list = mxl_zip.namelist()
+                logger.info(f"Files in MXL: {file_list}")
+
+                # Find the main XML file (usually the largest or one without path separators)
+                xml_files = [
+                    f for f in file_list if f.endswith(".xml") and "/" not in f
+                ]
+                if not xml_files:
+                    # Fallback: get any XML file
+                    xml_files = [f for f in file_list if f.endswith(".xml")]
+
+                if not xml_files:
+                    raise Exception("No XML file found in MXL archive")
+
+                # Use the first XML file found
+                xml_filename = xml_files[0]
+                logger.info(f"Extracting XML file: {xml_filename}")
+
+                # Extract and save the XML content
+                with mxl_zip.open(xml_filename) as xml_file:
+                    xml_content = xml_file.read()
+                    with open(destination_path, "wb") as output_file:
+                        output_file.write(xml_content)
+
+            logger.info(
+                f"Successfully extracted and saved XML file to: {destination_path}"
+            )
+
+            # Verify the file was actually created
+            if os.path.exists(destination_path):
+                file_size = os.path.getsize(destination_path)
+                logger.info(f"XML file created successfully. Size: {file_size} bytes")
+            else:
+                logger.error("XML file was not created despite successful extraction")
+
+        except Exception as e:
+            logger.error(
+                f"Failed to extract and copy XML file to output directory: {str(e)}"
+            )
+            logger.error(f"Exception type: {type(e).__name__}")
+            import traceback
+
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
         # Analyze MusicXML with music21
         score_stream = converter.parse(output_mxl_path)
         analysis = {

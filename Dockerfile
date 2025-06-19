@@ -72,5 +72,4 @@ RUN chmod +x entrypoint.web.sh entrypoint.celery.sh entrypoint.prod.sh
 RUN mkdir -p /processing/input /processing/output && \
     chmod -R 755 /processing/input /processing/output
 
-# Default command
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+ENTRYPOINT ["/app/entrypoint.web.sh"]

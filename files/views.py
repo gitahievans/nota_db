@@ -78,7 +78,7 @@ class PDFUploadView(APIView):
 class ServeMusicXMLView(View):
     def get(self, request, score_id):
         score = get_object_or_404(PDFFile, pk=score_id)
-        file_path = settings.TEMP_STORAGE_DIR / f"{score.id}/output.mxl"
+        file_path = settings.TEMP_STORAGE_DIR / f"{score.id}/output.xml"
         if not file_path.exists():
             logger.error(f"MusicXML file not found at {file_path}")
             return HttpResponse(status=404, content="MusicXML file not found")
