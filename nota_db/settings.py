@@ -18,9 +18,15 @@ TEMP_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 CLEANUP_DELAY_SECONDS = 60 * 60  # 1 hour
 
+OPENAI_API_KEY = os.environ.get(
+    "OPENAI_API_KEY",
+    "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",
+)
+
+
 INSTALLED_APPS = [
+    "django.contrib.auth",  # Required for Permission model
     "django.contrib.admin",
-    "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
@@ -29,6 +35,7 @@ INSTALLED_APPS = [
     "files",
     "corsheaders",
     "rest_framework",
+    "django_ai_assistant",
 ]
 
 

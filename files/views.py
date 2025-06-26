@@ -15,6 +15,11 @@ import boto3
 from django.conf import settings
 from django.http import HttpResponse, FileResponse
 from django.views import View
+from django_ai_assistant import AIAssistant
+from langchain_openai import ChatOpenAI
+from langchain.prompts import PromptTemplate
+from django.http import JsonResponse
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +78,88 @@ class PDFUploadView(APIView):
             )
         logger.error(f"Upload failed: {serializer.errors}")
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class GenerateSummaryView(APIView):
+    def post(self, request):
+        # Log raw request body for debugging
+        logger.debug(f"Raw request body: {request.body}")
+
+        # Safely parse JSON
+        try:
+            data = request.data
+            score_id = data.get("score_id")
+        except ValueError as e:
+            logger.error(f"JSON parse error: {str(e)}")
+            return JsonResponse(
+                {"error": f"Invalid JSON: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not score_id:
+            logger.error("No score_id provided in request")
+            return JsonResponse(
+                {"error": "score_id is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            score = PDFFile.objects.get(id=score_id)
+        except PDFFile.DoesNotExist:
+            logger.error(f"PDFFile with id {score_id} not found")
+            return JsonResponse(
+                {"error": f"Score with id {score_id} not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if not score.processed or not score.results:
+            logger.error(f"Score {score_id} not processed or results missing")
+            return JsonResponse(
+                {"error": "Score is not processed or analysis results are missing"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            # Parse Music21 results
+            results = score.results
+            if isinstance(results, str):
+                results = json.loads(results)
+
+            # Initialize LLM
+            llm = ChatOpenAI(
+                model="gpt-4o",
+                api_key="your-openai-api-key",  # Replace with your API key or use os.getenv
+            )
+
+            # Format prompt as a single string
+            results_str = json.dumps(results, indent=2)
+            prompt = (
+                f"Generate a concise summary of a music score titled '{score.title}' by {score.composer}. "
+                f"The analysis results are:\n{results_str}\n"
+                f"Include insights on musical style, structure, and historical context."
+            )
+
+            # Generate summary using LangChain directly
+            try:
+                summary = llm.invoke(prompt).content
+            except Exception as e:
+                logger.error(f"LLM call failed: {str(e)}")
+                raise
+
+            # Save summary to PDFFile
+            score.summary = summary
+            score.save()
+            logger.info(f"Generated and saved summary for score {score_id}")
+
+            return JsonResponse(
+                {"status": "success", "score_id": score_id, "summary": summary},
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to generate summary for score {score_id}: {str(e)}")
+            return JsonResponse(
+                {"error": f"Failed to generate summary: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class ServeMusicXMLView(View):
