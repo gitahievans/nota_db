@@ -2,6 +2,7 @@ from django.db import models
 from storages.backends.s3boto3 import S3Boto3Storage
 from django.contrib.postgres.fields import JSONField
 
+
 class PDFFileStorage(S3Boto3Storage):
     location = "nota-pdfs"
 
@@ -31,6 +32,7 @@ class PDFFile(models.Model):
     processed = models.BooleanField(default=False, blank=True, null=True)
     musicxml_url = models.URLField(max_length=2000, null=True, blank=True)
     midi_url = models.URLField(max_length=2000, null=True, blank=True)
+    summary = models.TextField(null=True, blank=True)
 
     def __str__(self):
         return f"{self.title} - {self.composer}"
