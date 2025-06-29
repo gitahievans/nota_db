@@ -20,6 +20,8 @@ from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from django.http import JsonResponse
 import json
+import os
+from google.generativeai import GenerativeModel, configure
 
 logger = logging.getLogger(__name__)
 
@@ -123,11 +125,9 @@ class GenerateSummaryView(APIView):
             if isinstance(results, str):
                 results = json.loads(results)
 
-            # Initialize LLM
-            llm = ChatOpenAI(
-                model="gpt-4o",
-                api_key="your-openai-api-key",  # Replace with your API key or use os.getenv
-            )
+            # Initialize Gemini API
+            configure(api_key=os.getenv("GEMINI_API_KEY"))  # Use environment variable
+            model = GenerativeModel("gemini-2.5-flash")
 
             # Format prompt as a single string
             results_str = json.dumps(results, indent=2)
@@ -137,11 +137,12 @@ class GenerateSummaryView(APIView):
                 f"Include insights on musical style, structure, and historical context."
             )
 
-            # Generate summary using LangChain directly
+            # Generate summary using Gemini
             try:
-                summary = llm.invoke(prompt).content
+                response = model.generate_content(prompt)
+                summary = response.text
             except Exception as e:
-                logger.error(f"LLM call failed: {str(e)}")
+                logger.error(f"Gemini API call failed: {str(e)}")
                 raise
 
             # Save summary to PDFFile
