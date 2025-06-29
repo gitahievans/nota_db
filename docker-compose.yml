@@ -1,10 +1,9 @@
-version: '3.9'
 services:
   db:
     image: postgres:16
     container_name: nota_db
     env_file:
-      - .env
+      - .env.prod
     environment:
       POSTGRES_DB: nota_db        
       POSTGRES_USER: ${DB_USER}       
@@ -30,67 +29,69 @@ services:
       timeout: 5s
       retries: 5
 
-  celery:
-    build: .
-    container_name: nota_celery
-    volumes:
-      - ./files:/app/files
-      - ./nota_db:/app/nota_db
-      - ./entrypoint.web.sh:/app/entrypoint.web.sh
-      - ./entrypoint.celery.sh:/app/entrypoint.celery.sh
-      - ./entrypoint.prod.sh:/app/entrypoint.prod.sh
-      - ./manage.py:/app/manage.py
-      - ./requirements.txt:/app/requirements.txt
-      - ./static:/app/static
-      - ./staticfiles:/app/staticfiles
-      - ./output:/app/output  # Add this line for MusicXML files
-      - nota_tmp:/tmp/nota
-      - processing_data:/processing
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      - DJANGO_ENV=development
-      - DEBUG=${DEBUG:-1}
-    entrypoint: ["/app/entrypoint.celery.sh"]
-    command: ["celery", "-A", "nota_db", "worker", "--loglevel=info"]
-
   web:
     build: .
     container_name: nota_web
     volumes:
-      - ./files:/app/files
-      - ./nota_db:/app/nota_db
-      - ./entrypoint.web.sh:/app/entrypoint.web.sh
-      - ./entrypoint.celery.sh:/app/entrypoint.celery.sh
-      - ./entrypoint.prod.sh:/app/entrypoint.prod.sh
-      - ./manage.py:/app/manage.py
-      - ./requirements.txt:/app/requirements.txt
-      - ./static:/app/static
-      - ./staticfiles:/app/staticfiles
-      - ./output:/app/output  # Add this line for MusicXML files
-      - nota_tmp:/tmp/nota
       - processing_data:/processing
+      - nota_tmp:/tmp/nota
+      - static_volume:/app/staticfiles  # Add this for Caddy to access static files
     ports:
-      - "8000:8000"
+      - "8001:8000"  # Changed from 8000 to 8001 to avoid conflict with soundleaf
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
     env_file:
-      - .env
+      - .env.prod
     environment:
-      - DJANGO_ENV=development
-      - DEBUG=${DEBUG:-1}
-    entrypoint: ["/app/entrypoint.web.sh"]
+      - DJANGO_ENV=production
+      - DEBUG=${DEBUG:-0}
+    entrypoint: ["/app/entrypoint.prod.sh"]
+
+  celery:
+    build: .
+    container_name: nota_celery
+    volumes:
+      - processing_data:/processing
+      - nota_tmp:/tmp/nota
+      - static_volume:/app/staticfiles
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env.prod
+    environment:
+      - DJANGO_ENV=production
+      - DEBUG=${DEBUG:-0}
+    entrypoint: ["/app/entrypoint.celery.sh"]
+    command: ["celery", "-A", "nota_db", "worker", "--loglevel=info"]
+
+  caddy:
+    image: caddy:2.8
+    container_name: nota_caddy
+    ports:
+      - "8080:80"   # Different port to avoid conflict with soundleaf
+      - "8443:443"  # Different port to avoid conflict with soundleaf
+    volumes:
+      - /etc/caddy/Caddyfile.notadb:/etc/caddy/Caddyfile
+      - /etc/caddy/notadb.crt:/etc/caddy/notadb.crt
+      - /etc/caddy/notadb.key:/etc/caddy/notadb.key
+      - static_volume:/app/staticfiles
+      - caddy_data_nota:/data
+      - caddy_config_nota:/config
+    depends_on:
+      - web
+    restart: unless-stopped
 
 volumes:
   postgres_data:
   redis_data:
   processing_data:
   nota_tmp:
+  static_volume:  # Add this new volume for static files
+  caddy_data_nota:  # Add this for Caddy data
+  caddy_config_nota:  # Add this for Caddy config
