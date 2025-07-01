@@ -22,6 +22,7 @@ from django.http import JsonResponse
 import json
 import os
 from google.generativeai import GenerativeModel, configure
+import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
 
@@ -125,8 +126,16 @@ class GenerateSummaryView(APIView):
             if isinstance(results, str):
                 results = json.loads(results)
 
-            # Initialize Gemini API
-            configure(api_key=os.getenv("GEMINI_API_KEY"))  # Use environment variable
+            api_key = os.getenv("GOOGLE_API_KEY")
+            if not api_key:
+                logger.error("GOOGLE_API_KEY environment variable is not set")
+                return JsonResponse(
+                    {"error": "Server configuration error: API key missing"},
+                    status=500,
+                )
+
+            logger.debug("Configuring Gemini API")
+            genai.configure(api_key=api_key)
             model = GenerativeModel("gemini-2.5-flash")
 
             # Format prompt as a single string
