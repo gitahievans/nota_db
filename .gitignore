@@ -5,3 +5,4 @@ __pycache__
 staticfiles/
 media/
 .DS_Store
+docker-compose.local.yml

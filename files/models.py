@@ -22,7 +22,7 @@ class PDFFile(models.Model):
     title = models.CharField(max_length=100)
     lyrics = models.TextField(null=True, blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
-    pdf_file = models.FileField(upload_to="", storage=PDFFileStorage(), blank=True)
+    file = models.FileField(upload_to="", storage=PDFFileStorage(), blank=True)
     composer = models.CharField(
         max_length=100, blank=False, null=False, default="Anonymous"
     )

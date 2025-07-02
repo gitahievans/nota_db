@@ -3,7 +3,7 @@ set -e
 
 
 echo "Applying migrations..."
-python manage.py makemigrations
+python manage.py makemigrations --noinput
 python manage.py migrate --noinput
 
 echo "Starting Django server..."

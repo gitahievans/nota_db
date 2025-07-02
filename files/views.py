@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from .models import PDFFile, Category
 from .serializers import CategorySerializer
-from .serializers import PDFFileSerializer
+from .serializers import FileSerializer
 from django.http import HttpResponse
 import logging
 from .tasks import process_score
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 class FileUploadView(APIView):
     def post(self, request):
-        serializer = PDFFileSerializer(data=request.data)
+        serializer = FileSerializer(data=request.data)
         logger.info(f"Incoming data: {request.data}")
         if serializer.is_valid():
             logger.info("Serializer is valid")
@@ -271,7 +271,7 @@ class ServeMIDIView(View):
 class PDFListView(APIView):
     def get(self, request):
         files = PDFFile.objects.all()
-        serializer = PDFFileSerializer(files, many=True)
+        serializer = FileSerializer(files, many=True)
         return Response(serializer.data)
 
 
@@ -279,7 +279,7 @@ class PDFFileDetailView(APIView):
     def get(self, request, pk):
         try:
             score = PDFFile.objects.get(pk=pk)
-            serializer = PDFFileSerializer(score)
+            serializer = FileSerializer(score)
             task_id = request.query_params.get("task_id")
             task_status = None
             if task_id:
@@ -324,7 +324,7 @@ class CategoryListView(APIView):
 class UpdatePDFView(APIView):
     def put(self, request, pk):
         pdf = get_object_or_404(PDFFile, pk=pk)
-        serializer = PDFFileSerializer(pdf, data=request.data)
+        serializer = FileSerializer(pdf, data=request.data)
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
