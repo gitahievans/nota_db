@@ -126,8 +126,10 @@ class GenerateSummaryView(APIView):
             if isinstance(results, str):
                 results = json.loads(results)
 
+            api_key = AIzaS
+
             logger.debug("Configuring Gemini API")
-            genai.configure(api_key="AIzaSyAJvW7orvp0K-_bDkQ3Ffr34IvwSd3kQ0g")
+            genai.configure(api_key=api_key)
             model = GenerativeModel("gemini-2.5-flash")
 
             # Format prompt as a single string
