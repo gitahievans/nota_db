@@ -9,7 +9,13 @@ class CategorySerializer(serializers.ModelSerializer):
         fields = ["id", "name"]
 
 
-class PDFFileSerializer(serializers.ModelSerializer):
+import json
+from rest_framework import serializers
+from .models import PDFFile, Category
+from .serializers import CategorySerializer
+
+
+class FileSerializer(serializers.ModelSerializer):
     categories = CategorySerializer(many=True, required=False)
     results = serializers.SerializerMethodField()
 
@@ -19,7 +25,7 @@ class PDFFileSerializer(serializers.ModelSerializer):
             "id",
             "title",
             "lyrics",
-            "pdf_file",
+            "file",
             "composer",
             "year",
             "categories",
@@ -40,15 +46,27 @@ class PDFFileSerializer(serializers.ModelSerializer):
                 return {"error": f"Invalid JSON: {str(e)}"}
         return None
 
-    def validate_pdf_file(self, value):
-        if value.content_type != "application/pdf":
-            raise serializers.ValidationError("Only PDF files are allowed.")
+    def validate_file(self, value):
+        allowed_content_types = [
+            "application/pdf",
+            "image/jpeg",
+            "image/png",
+            "image/tiff",
+        ]
+        if value.content_type not in allowed_content_types:
+            raise serializers.ValidationError(
+                f"Only PDF, JPG, PNG, and TIFF files are allowed. Got {value.content_type}."
+            )
+        # Optional: Add file size validation
+        max_size = 10 * 1024 * 1024  # 10MB
+        if value.size > max_size:
+            raise serializers.ValidationError("File size exceeds 10MB limit.")
         return value
 
     def create(self, validated_data):
         categories_data = validated_data.pop("categories", [])
         try:
-            pdf_file = PDFFile.objects.create(**validated_data)
+            file_instance = PDFFile.objects.create(**validated_data)
             for category_data in categories_data:
                 if isinstance(category_data, dict):
                     category_name = category_data.get("name")
@@ -57,8 +75,8 @@ class PDFFileSerializer(serializers.ModelSerializer):
                 category_obj, created = Category.objects.get_or_create(
                     name=category_name
                 )
-                pdf_file.categories.add(category_obj)
-            return pdf_file
+                file_instance.categories.add(category_obj)
+            return file_instance
         except Exception as e:
             print(f"Error in create: {str(e)}")
             raise

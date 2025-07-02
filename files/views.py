@@ -23,58 +23,80 @@ import json
 import os
 from google.generativeai import GenerativeModel, configure
 import google.generativeai as genai
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
 
-class PDFUploadView(APIView):
+class FileUploadView(APIView):
     def post(self, request):
         serializer = PDFFileSerializer(data=request.data)
         logger.info(f"Incoming data: {request.data}")
         if serializer.is_valid():
             logger.info("Serializer is valid")
             analyze = request.data.get("analyze", "false").lower() == "true"
-            pdf_file = request.FILES.get("pdf_file")
-            if not pdf_file and analyze:
-                logger.error("No PDF file provided for analysis")
+            uploaded_file = request.FILES.get("file")  # Changed from pdf_file to file
+            if not uploaded_file and analyze:
+                logger.error("No file provided for analysis")
                 return Response(
-                    {"error": "PDF file is required for analysis"},
+                    {"error": "File is required for analysis"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
             if analyze:
-                score = serializer.save(pdf_file=None)  # Temporarily skip file field
+                score = serializer.save(file=None)  # Temporarily skip file field
                 temp_dir = settings.TEMP_STORAGE_DIR / str(score.id)
                 temp_dir.mkdir(parents=True, exist_ok=True)
-                temp_path = temp_dir / "input.pdf"
-                logger.info(f"Saving PDF to {temp_path}")
+                file_ext = uploaded_file.name.split(".")[-1].lower()
+                temp_path = temp_dir / f"input.{file_ext}"
+
+                logger.info(f"Saving file to {temp_path}")
                 try:
-                    with open(temp_path, "wb") as f:
-                        for chunk in pdf_file.chunks():
-                            f.write(chunk)
-                    score.pdf_file.name = None  # Clear the name to avoid saving
-                    score.save()  # Save again to update pdf_file
-                    logger.info(f"PDF saved to {temp_path}, pdf_file field cleared")
+                    if file_ext in ["jpg", "jpeg", "png", "tiff"]:
+                        # Preprocess image
+                        img = Image.open(uploaded_file).convert(
+                            "L"
+                        )  # Convert to grayscale
+                        img = img.point(
+                            lambda x: 0 if x < 128 else 255, "1"
+                        )  # Binarize
+                        img.save(temp_path, format=file_ext.upper())
+                    elif file_ext == "pdf":
+                        with open(temp_path, "wb") as f:
+                            for chunk in uploaded_file.chunks():
+                                f.write(chunk)
+                    else:
+                        logger.error(f"Unsupported file format: {file_ext}")
+                        return Response(
+                            {"error": f"Unsupported file format: {file_ext}"},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    score.file = None  # Clear the file field to avoid saving
+                    score.save()  # Save again to update file field
+                    logger.info(f"File saved to {temp_path}, file field cleared")
                 except Exception as e:
-                    logger.error(f"Failed to save PDF to {temp_path}: {str(e)}")
+                    logger.error(f"Failed to save file to {temp_path}: {str(e)}")
                     return Response(
-                        {"error": f"Failed to save PDF: {str(e)}"},
+                        {"error": f"Failed to save file: {str(e)}"},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     )
             else:
-                score = serializer.save()  # Use PDFFileStorage for R2
+                score = serializer.save()  # Use storage for R2
 
             logger.info(f"Uploaded score ID: {score.id}")
             task_id = None
             if analyze:
-                task = process_score.delay(score.id)
+                task = process_score.delay(
+                    score.id, file_ext=file_ext
+                )  # Pass file_ext to task
                 task_id = task.id
             return Response(
                 {
                     "status": "success",
                     "score_id": score.id,
                     "task_id": task_id,
-                    "message": "PDF uploaded"
+                    "message": f"{'Image' if file_ext != 'pdf' else 'PDF'} uploaded"
                     + (" and processing started" if analyze else ""),
                 },
                 status=status.HTTP_201_CREATED,

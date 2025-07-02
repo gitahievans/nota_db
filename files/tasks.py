@@ -32,18 +32,18 @@ AUDIVERIS_HOME = "/app/audiveris"
 
 
 @shared_task
-def process_score(score_id):
+def process_score(score_id, file_ext):
     try:
         # Fetch the PDF file record
         score = PDFFile.objects.get(id=score_id)
         logger.info(f"Processing score ID: {score_id}")
 
         # get pdfs locally
-        pdf_path = settings.TEMP_STORAGE_DIR / f"{score.id}/input.pdf"
-        if not pdf_path.exists():
-            logger.error(f"PDF file not found at {pdf_path}")
-            raise FileNotFoundError(f"PDF file not found at {pdf_path}")
-        logger.info(f"PDF file found at {pdf_path}")
+        input_path = settings.TEMP_STORAGE_DIR / f"{score.id}/input.{file_ext}"
+        if not input_path.exists():
+            logger.error(f"PDF file not found at {input_path}")
+            raise FileNotFoundError(f"PDF file not found at {input_path}")
+        logger.info(f"PDF file found at {input_path}")
 
         # Verify working directory
         audiveris_dir = "/app/audiveris"
@@ -61,7 +61,7 @@ def process_score(score_id):
             "/opt/gradle-8.7/bin/gradle",
             "run",
             "-PjvmLineArgs=-Xmx3g",
-            f"-PcmdLineArgs=-batch,-export,-output,{mxl_path},--,{pdf_path}",
+            f"-PcmdLineArgs=-batch,-export,-output,{mxl_path},--,{input_path}",
         ]
         # audiveris_cmd = [
         #     f"{AUDIVERIS_HOME}/gradlew",
