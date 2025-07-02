@@ -130,12 +130,57 @@ class GenerateSummaryView(APIView):
             genai.configure(api_key="AIzaSyAJvW7orvp0K-_bDkQ3Ffr34IvwSd3kQ0g")
             model = GenerativeModel("gemini-2.5-flash")
 
-            # Format prompt as a single string
+            # Extract key values upfront for cleaner prompt formatting and reliability
             results_str = json.dumps(results, indent=2)
+            key_signature = results.get("key", "not detected")
+            time_signature = results.get("time_signature", "not specified")
+
+            # Extract score structure information
+            score_structure = results.get("score_structure", {})
+            score_type = score_structure.get("score_type", "unknown")
+            ensemble_type = score_structure.get("ensemble_type", "not specified")
+
+            # Extract notable elements for preview
+            notable_elements = results.get("notable_elements", {})
+            accidentals = notable_elements.get("accidentals", {})
+            articulations = notable_elements.get("articulations", {})
+            dynamics = notable_elements.get("dynamics", {})
+
+            # Create summary of key findings
+            key_findings = []
+            if accidentals.get("has_accidentals"):
+                key_findings.append("accidentals")
+            if articulations.get("staccato", {}).get("has_staccato"):
+                key_findings.append("staccato")
+            if articulations.get("accent", {}).get("has_accent"):
+                key_findings.append("accents")
+            if articulations.get("tenuto", {}).get("has_tenuto"):
+                key_findings.append("tenuto")
+            if dynamics.get("has_dynamics"):
+                key_findings.append("dynamics")
+
+            # Format prompt with direct data references
             prompt = (
-                f"Generate a concise summary of a music score titled '{score.title}' by {score.composer}. "
-                f"The analysis results are:\n{results_str}\n"
-                f"Include insights on musical style, structure, and historical context."
+                f"You are a music theory expert explaining '{score.title}' by {score.composer or 'Unknown'} "
+                f"to a music theory beginner using Music21 analysis results.\n\n"
+                f"Key musical elements detected:\n"
+                f"- Key signature: {key_signature}\n"
+                f"- Time signature: {time_signature}\n"
+                f"- Ensemble type: {ensemble_type}\n"
+                f"- Score type: {score_type}\n"
+                f"- Notable features found: {', '.join(key_findings) if key_findings else 'Basic elements only'}\n\n"
+                f"Full analysis data:\n{results_str}\n\n"
+                f"Your primary goal is to explain the Music21 analysis results in a clear, concise, and beginner-friendly way. Focus on:\n\n"
+                f"1. **Explain Key Elements**: Describe the key signature ({key_signature}), time signature ({time_signature}), "
+                f"ensemble type ({ensemble_type}), and any chord progressions detected. Clarify what these terms mean and their role in the music.\n\n"
+                f"2. **Highlight Notable Features**: The analysis detected these notable elements: {', '.join(key_findings) if key_findings else 'none'}. "
+                f"For each present element, explain what it is, how it affects the music, and why it might be challenging for a beginner.\n\n"
+                f"3. **Address Beginner Challenges**: Identify elements that might be confusing for new learners "
+                f"(e.g., unusual time signatures, frequent accidentals, specific articulations) and provide simple explanations.\n\n"
+                f"4. **Contextual Insights (Secondary)**: Briefly comment on the musical style or structure, "
+                f"but only after explaining the analysis results.\n\n"
+                f"Keep the explanation concise (150-200 words), avoid jargon unless explained, and ensure the tone is "
+                f"encouraging and educational for a beginner. Focus on the meaningful musical content and ignore visualization data."
             )
 
             # Generate summary using Gemini
