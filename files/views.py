@@ -27,6 +27,7 @@ import google.generativeai as genai
 from PIL import Image, ImageEnhance
 import cv2
 import numpy as np
+from .text_extraction import TextExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +198,36 @@ class FileUploadView(APIView):
             else:
                 score = serializer.save()
 
+            if analyze:
+                # Extract text before/alongside music processing
+                text_extractor = TextExtractor()
+                logger.info("Starting text extraction...")
+
+                try:
+                    extracted_text = text_extractor.extract_from_file(
+                        temp_path, file_ext
+                    )
+
+                    # Store text extraction results temporarily
+                    text_results_path = temp_dir / "text_results.json"
+                    with open(text_results_path, "w", encoding="utf-8") as f:
+                        import json
+
+                        json.dump(extracted_text, f, ensure_ascii=False, indent=2)
+
+                    logger.info(f"Text extraction completed: {extracted_text}")
+
+                except Exception as e:
+                    logger.error(f"Text extraction failed: {str(e)}")
+                    extracted_text = {"error": f"Text extraction failed: {str(e)}"}
+
+                    # Still save the error for debugging
+                    text_results_path = temp_dir / "text_results.json"
+                    with open(text_results_path, "w", encoding="utf-8") as f:
+                        import json
+
+                        json.dump(extracted_text, f, ensure_ascii=False, indent=2)
+
             logger.info(f"Uploaded score ID: {score.id}")
             task_id = None
             if analyze:
@@ -294,6 +325,10 @@ class GenerateSummaryView(APIView):
             if dynamics.get("has_dynamics"):
                 key_findings.append("dynamics")
 
+            # Extract text content for cleaning
+            text_content = results.get("text_content", {})
+            other_text = text_content.get("other_text", [])
+
             # Format prompt with direct data references
             prompt = (
                 f"You are a music theory expert explaining '{score.title}' by {score.composer or 'Unknown'} "
@@ -315,26 +350,69 @@ class GenerateSummaryView(APIView):
                 f"4. **Contextual Insights (Secondary)**: Briefly comment on the musical style or structure, "
                 f"but only after explaining the analysis results.\n\n"
                 f"Keep the explanation concise (150-200 words), avoid jargon unless explained, and ensure the tone is "
-                f"encouraging and educational for a beginner. Focus on the meaningful musical content and ignore visualization data."
+                f"encouraging and educational for a beginner. Focus on the meaningful musical content and ignore visualization data.\n\n"
+                f"5. **Text Cleaning Task**: The OCR text extraction produced some gibberish mixed with meaningful text. "
+                f"Here is the raw extracted text that needs cleaning:\n{other_text}\n\n"
+                f"After your music theory summary, add a section titled '--- EXTRACTED TEXT ---' and provide only the "
+                f"meaningful, readable text from the extraction. Remove:\n"
+                f"- Unicode musical symbols and notation artifacts\n"
+                f"- Fragmented words and incomplete phrases\n"
+                f"- Repetitive patterns and spacing artifacts\n"
+                f"- Musical notation gibberish\n"
+                f"Keep only:\n"
+                f"- Complete song titles\n"
+                f"- Composer/author names\n"
+                f"- Complete lyrics or verse text\n"
+                f"- Performance instructions in clear language\n"
+                f"- Dates, locations, and other meaningful metadata\n"
+                f"- Any other coherent, readable text content\n"
+                f"Present the extracted text in a well-organized format with clear labels (e.g., Title:, Composer:, Lyrics:, etc.)."
             )
 
             # Generate summary using Gemini
             try:
                 response = model.generate_content(prompt)
-                summary = response.text
+                full_response = response.text
+
+                # Split the response into summary and extracted text
+                if "--- EXTRACTED TEXT ---" in full_response:
+                    summary, cleaned_text = full_response.split(
+                        "--- EXTRACTED TEXT ---", 1
+                    )
+                    summary = summary.strip()
+                    cleaned_text = cleaned_text.strip()
+
+                    # Update the results with extracted text
+                    if isinstance(results, dict):
+                        if "text_content" not in results:
+                            results["text_content"] = {}
+                        results["text_content"]["cleaned_text"] = cleaned_text
+
+                        # Update the score's results
+                        score.results = json.dumps(results)
+                else:
+                    summary = full_response
+                    cleaned_text = None
+
             except Exception as e:
                 logger.error(f"Gemini API call failed: {str(e)}")
                 raise
 
-            # Save summary to PDFFile
+            # Save summary and updated results to PDFFile
             score.summary = summary
             score.save()
             logger.info(f"Generated and saved summary for score {score_id}")
 
-            return JsonResponse(
-                {"status": "success", "score_id": score_id, "summary": summary},
-                status=status.HTTP_200_OK,
-            )
+            response_data = {
+                "status": "success",
+                "score_id": score_id,
+                "summary": summary,
+            }
+
+            if cleaned_text:
+                response_data["cleaned_text"] = cleaned_text
+
+            return JsonResponse(response_data, status=status.HTTP_200_OK)
 
         except Exception as e:
             logger.error(f"Failed to generate summary for score {score_id}: {str(e)}")

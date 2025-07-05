@@ -669,6 +669,30 @@ def process_score(score_id, file_ext):
                 f"Part {i+1} ID: {part.id}, PartName: {getattr(part, 'partName', 'None')}"
             )
 
+        # Load text extraction results
+        try:
+            text_results_path = (
+                settings.TEMP_STORAGE_DIR / f"{score_id}/text_results.json"
+            )
+            if text_results_path.exists():
+                with open(text_results_path, "r", encoding="utf-8") as f:
+                    text_results = json.load(f)
+
+                # Add text results to analysis
+                analysis["text_content"] = text_results
+                logger.info(f"Added text extraction results: {text_results}")
+            else:
+                logger.warning("No text extraction results found")
+                analysis["text_content"] = {
+                    "message": "No text extraction results available"
+                }
+
+        except Exception as e:
+            logger.error(f"Failed to load text extraction results: {str(e)}")
+            analysis["text_content"] = {
+                "error": f"Failed to load text extraction results: {str(e)}"
+            }
+
         # Save results to database
         try:
             score.results = json.dumps(analysis)
