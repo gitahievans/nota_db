@@ -21,6 +21,18 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends postgresql-client && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Install system dependencies for OpenCV
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    libfontconfig1 \
+    libxcb1 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Java 21 (Temurin)
 RUN mkdir -p /etc/apt/keyrings && \
     wget -q -O /etc/apt/keyrings/adoptium.asc https://packages.adoptium.net/artifactory/api/gpg/key/public && \
@@ -51,8 +63,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# Explicitly install music21 if not in requirements.txt
-RUN pip install music21
+# # Explicitly install music21 if not in requirements.txt
+# RUN pip install music21
 
 # Install Docker CLI (optional, for debugging)
 RUN apt-get update && \

@@ -21,21 +21,121 @@ from langchain.prompts import PromptTemplate
 from django.http import JsonResponse
 import json
 import os
+from django.conf import settings
 from google.generativeai import GenerativeModel, configure
 import google.generativeai as genai
-from PIL import Image
+from PIL import Image, ImageEnhance
+import cv2
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 
 class FileUploadView(APIView):
+    def preprocess_image_for_audiveris(self, image_path, target_dpi=300):
+        """
+        Preprocess image to improve Audiveris recognition.
+        Target DPI of 300 is recommended by Audiveris.
+        """
+        try:
+            # Read image with OpenCV for better processing
+            img = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+            if img is None:
+                # Fallback to PIL if OpenCV fails
+                pil_img = Image.open(image_path)
+                img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+
+            original_height, original_width = img.shape[:2]
+            logger.info(
+                f"Original image dimensions: {original_width}x{original_height}"
+            )
+
+            # Calculate current DPI estimate (assume typical sheet music is ~8.5" wide)
+            estimated_width_inches = 8.5
+            current_dpi = original_width / estimated_width_inches
+            logger.info(f"Estimated current DPI: {current_dpi:.1f}")
+
+            # Calculate scaling factor to achieve target DPI
+            if current_dpi < target_dpi:
+                scale_factor = target_dpi / current_dpi
+                # Cap scaling to avoid excessive upscaling
+                scale_factor = min(scale_factor, 3.0)
+
+                new_width = int(original_width * scale_factor)
+                new_height = int(original_height * scale_factor)
+
+                logger.info(
+                    f"Upscaling by factor {scale_factor:.2f} to {new_width}x{new_height}"
+                )
+
+                # Use INTER_CUBIC for upscaling (better quality)
+                img = cv2.resize(
+                    img, (new_width, new_height), interpolation=cv2.INTER_CUBIC
+                )
+
+            # Convert to grayscale
+            if len(img.shape) == 3:
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = img
+
+            # Apply slight Gaussian blur to reduce noise
+            gray = cv2.GaussianBlur(gray, (3, 3), 0)
+
+            # Enhance contrast using CLAHE (Contrast Limited Adaptive Histogram Equalization)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            gray = clahe.apply(gray)
+
+            # Apply adaptive thresholding instead of simple binarization
+            # This preserves more detail for Audiveris
+            binary = cv2.adaptiveThreshold(
+                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+            )
+
+            # Optional: Apply morphological operations to clean up the image
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+            binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+
+            # Save the processed image
+            cv2.imwrite(str(image_path), binary)
+
+            final_height, final_width = binary.shape
+            logger.info(
+                f"Final processed image dimensions: {final_width}x{final_height}"
+            )
+
+            # Estimate interline spacing for validation
+            # Typical interline spacing should be at least 15-20 pixels for good recognition
+            estimated_interline = (
+                final_height / 50
+            )  # Rough estimate based on typical sheet music
+            logger.info(
+                f"Estimated interline spacing: {estimated_interline:.1f} pixels"
+            )
+
+            if estimated_interline < 15:
+                logger.warning(
+                    f"Estimated interline spacing ({estimated_interline:.1f}px) may be too low for reliable recognition"
+                )
+
+            return (
+                True,
+                f"Image processed successfully. Final size: {final_width}x{final_height}",
+            )
+
+        except Exception as e:
+            logger.error(f"Image preprocessing failed: {str(e)}")
+            return False, f"Image preprocessing failed: {str(e)}"
+
     def post(self, request):
         serializer = FileSerializer(data=request.data)
         logger.info(f"Incoming data: {request.data}")
+
         if serializer.is_valid():
             logger.info("Serializer is valid")
             analyze = request.data.get("analyze", "false").lower() == "true"
-            uploaded_file = request.FILES.get("file")  # Changed from pdf_file to file
+            uploaded_file = request.FILES.get("file")
+
             if not uploaded_file and analyze:
                 logger.error("No file provided for analysis")
                 return Response(
@@ -44,7 +144,7 @@ class FileUploadView(APIView):
                 )
 
             if analyze:
-                score = serializer.save(file=None)  # Temporarily skip file field
+                score = serializer.save(file=None)
                 temp_dir = settings.TEMP_STORAGE_DIR / str(score.id)
                 temp_dir.mkdir(parents=True, exist_ok=True)
                 file_ext = uploaded_file.name.split(".")[-1].lower()
@@ -52,16 +152,26 @@ class FileUploadView(APIView):
 
                 logger.info(f"Saving file to {temp_path}")
                 try:
-                    if file_ext in ["jpg", "jpeg", "png", "tiff"]:
-                        # Preprocess image
-                        img = Image.open(uploaded_file).convert(
-                            "L"
-                        )  # Convert to grayscale
-                        img = img.point(
-                            lambda x: 0 if x < 128 else 255, "1"
-                        )  # Binarize
-                        img.save(temp_path, format=file_ext.upper())
+                    if file_ext in ["jpg", "jpeg", "png", "tiff", "tif"]:
+                        # Save original file first
+                        with open(temp_path, "wb") as f:
+                            for chunk in uploaded_file.chunks():
+                                f.write(chunk)
+
+                        # Apply advanced preprocessing for images
+                        success, message = self.preprocess_image_for_audiveris(
+                            temp_path
+                        )
+                        if not success:
+                            logger.error(f"Image preprocessing failed: {message}")
+                            return Response(
+                                {"error": f"Image preprocessing failed: {message}"},
+                                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            )
+                        logger.info(f"Image preprocessing completed: {message}")
+
                     elif file_ext == "pdf":
+                        # PDF processing remains unchanged
                         with open(temp_path, "wb") as f:
                             for chunk in uploaded_file.chunks():
                                 f.write(chunk)
@@ -72,25 +182,27 @@ class FileUploadView(APIView):
                             status=status.HTTP_400_BAD_REQUEST,
                         )
 
-                    score.file = None  # Clear the file field to avoid saving
-                    score.save()  # Save again to update file field
+                    score.file = None
+                    score.save()
                     logger.info(f"File saved to {temp_path}, file field cleared")
+
                 except Exception as e:
-                    logger.error(f"Failed to save file to {temp_path}: {str(e)}")
+                    logger.error(
+                        f"Failed to save/process file to {temp_path}: {str(e)}"
+                    )
                     return Response(
-                        {"error": f"Failed to save file: {str(e)}"},
+                        {"error": f"Failed to save/process file: {str(e)}"},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     )
             else:
-                score = serializer.save()  # Use storage for R2
+                score = serializer.save()
 
             logger.info(f"Uploaded score ID: {score.id}")
             task_id = None
             if analyze:
-                task = process_score.delay(
-                    score.id, file_ext=file_ext
-                )  # Pass file_ext to task
+                task = process_score.delay(score.id, file_ext=file_ext)
                 task_id = task.id
+
             return Response(
                 {
                     "status": "success",
@@ -101,6 +213,7 @@ class FileUploadView(APIView):
                 },
                 status=status.HTTP_201_CREATED,
             )
+
         logger.error(f"Upload failed: {serializer.errors}")
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

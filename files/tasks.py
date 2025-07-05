@@ -23,7 +23,8 @@ from django.conf import settings
 from .models import PDFFile
 import logging
 import shutil
-
+import zipfile
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -34,16 +35,20 @@ AUDIVERIS_HOME = "/app/audiveris"
 @shared_task
 def process_score(score_id, file_ext):
     try:
-        # Fetch the PDF file record
+        # Fetch the file record
         score = PDFFile.objects.get(id=score_id)
-        logger.info(f"Processing score ID: {score_id}")
+        logger.info(f"Processing score ID: {score_id} with file extension: {file_ext}")
 
-        # get pdfs locally
+        # Get file locally
         input_path = settings.TEMP_STORAGE_DIR / f"{score.id}/input.{file_ext}"
         if not input_path.exists():
-            logger.error(f"PDF file not found at {input_path}")
-            raise FileNotFoundError(f"PDF file not found at {input_path}")
-        logger.info(f"PDF file found at {input_path}")
+            logger.error(f"File not found at {input_path}")
+            raise FileNotFoundError(f"File not found at {input_path}")
+        logger.info(f"File found at {input_path}")
+
+        # Log file size for debugging
+        file_size = os.path.getsize(input_path)
+        logger.info(f"File size: {file_size} bytes")
 
         # Verify working directory
         audiveris_dir = "/app/audiveris"
@@ -54,21 +59,41 @@ def process_score(score_id, file_ext):
             )
         logger.info(f"Audiveris directory contents: {os.listdir(audiveris_dir)}")
 
-        # Run Audiveris to convert PDF to MusicXML
+        # Run Audiveris to convert file to MusicXML
         mxl_path = settings.TEMP_STORAGE_DIR / f"{score_id}"
         logger.info(f"Starting Audiveris processing for score {score_id}")
+
+        # Build the command line arguments string for Audiveris
+        cmd_args = f"-batch,-export,-output,{mxl_path}"
+
+        # Add image-specific parameters for better recognition
+        if file_ext.lower() in ["jpg", "jpeg", "png", "tiff", "tif"]:
+            # Image-specific Audiveris parameters
+            image_options = [
+                "-option,org.audiveris.omr.sheet.Scale.targetInterline=20",
+                "-option,org.audiveris.omr.sheet.Scale.minInterline=12",
+                "-option,org.audiveris.omr.image.ImageFormatException.maxImageWidth=8192",
+                "-option,org.audiveris.omr.image.ImageFormatException.maxImageHeight=8192",
+                "-option,org.audiveris.omr.sheet.Sheet.maxSheetWidth=8192",
+                "-option,org.audiveris.omr.sheet.Sheet.maxSheetHeight=8192",
+                "-option,org.audiveris.omr.text.tesseract.TesseractOCR.useOCR=true",
+                "-option,org.audiveris.omr.classifier.SampleRepository.useRepository=true",
+            ]
+
+            # Add image options to command args
+            cmd_args += "," + ",".join(image_options)
+
+        # Add the input file path to command args
+        cmd_args += f",{input_path}"
+
+        # Build final Audiveris command
         audiveris_cmd = [
             "/opt/gradle-8.7/bin/gradle",
             "run",
-            "-PjvmLineArgs=-Xmx3g",
-            f"-PcmdLineArgs=-batch,-export,-output,{mxl_path},--,{input_path}",
+            "-PjvmLineArgs=-Xmx3g",  # Increased memory for image processing
+            f"-PcmdLineArgs={cmd_args}",
         ]
-        # audiveris_cmd = [
-        #     f"{AUDIVERIS_HOME}/gradlew",
-        #     "run",
-        #     "-PjvmLineArgs=-Xmx3g",
-        #     "-PcmdLineArgs=-batch,-export,-output,/tmp/nota/{score_id},--,/tmp/nota/{score_id}/input.pdf",
-        # ]
+
         try:
             logger.info(f"Running Audiveris command: {' '.join(audiveris_cmd)}")
             result = subprocess.run(
@@ -77,20 +102,86 @@ def process_score(score_id, file_ext):
                 capture_output=True,
                 text=True,
                 cwd=audiveris_dir,
+                timeout=300,  # 5 minute timeout
             )
-            logger.info(f"Audiveris output: {result.stdout}")
-            logger.info(f"Converted PDF to MusicXML at {mxl_path}")
+            logger.info(f"Audiveris stdout: {result.stdout}")
+            if result.stderr:
+                logger.warning(f"Audiveris stderr: {result.stderr}")
+            logger.info(f"Converted file to MusicXML at {mxl_path}")
+
+        except subprocess.TimeoutExpired:
+            logger.error(f"Audiveris processing timed out for score {score_id}")
+            raise Exception(
+                "Audiveris processing timed out - file may be too complex or large"
+            )
+
         except subprocess.CalledProcessError as e:
-            logger.error(f"Audiveris failed: {e.stderr}")
-            raise
+            logger.error(f"Audiveris failed with return code {e.returncode}")
+            logger.error(f"Audiveris stderr: {e.stderr}")
+            logger.error(f"Audiveris stdout: {e.stdout}")
+
+            # Check for specific error patterns and provide helpful messages
+            if "too low interline value" in e.stderr:
+                raise Exception(
+                    "Image resolution too low for music recognition. "
+                    "Please upload a higher resolution image (recommended: 300 DPI or higher)"
+                )
+            elif (
+                "Could not export since transcription did not complete successfully"
+                in e.stderr
+            ):
+                raise Exception(
+                    "Music recognition failed. Please ensure the image contains clear, "
+                    "well-lit sheet music with good contrast"
+                )
+            elif "OutOfMemoryError" in e.stderr:
+                raise Exception(
+                    "Image too large to process. Please reduce image size or complexity"
+                )
+            else:
+                raise Exception(f"Audiveris processing failed: {e.stderr}")
 
         # Find the generated MusicXML file
-        mxl_files = [f for f in os.listdir(mxl_path) if f.endswith(".mxl")]
-        if not mxl_files:
-            raise Exception("No MusicXML files generated")
-        mxl_file = os.path.join(mxl_path, mxl_files[0])
-        logger.info(f"Found MusicXML file: {mxl_file}")
+        try:
+            mxl_files = [f for f in os.listdir(mxl_path) if f.endswith(".mxl")]
+            if not mxl_files:
+                # List all files in the output directory for debugging
+                all_files = os.listdir(mxl_path) if os.path.exists(mxl_path) else []
+                logger.error(
+                    f"No MusicXML files generated. Files in output directory: {all_files}"
+                )
 
+                # Check for common Audiveris output files that might indicate what went wrong
+                omr_files = [f for f in all_files if f.endswith(".omr")]
+                if omr_files:
+                    logger.info(
+                        f"Found OMR files: {omr_files} - this suggests partial processing"
+                    )
+
+                raise Exception(
+                    "No MusicXML files generated. This usually means the image quality "
+                    "is insufficient for music recognition or the image doesn't contain "
+                    "recognizable sheet music."
+                )
+
+            mxl_file = os.path.join(mxl_path, mxl_files[0])
+            logger.info(f"Found MusicXML file: {mxl_file}")
+
+            # Verify the MXL file is valid by checking its size and structure
+            mxl_size = os.path.getsize(mxl_file)
+            logger.info(f"MusicXML file size: {mxl_size} bytes")
+
+            if mxl_size < 100:  # Very small files are likely empty or corrupt
+                logger.error(f"Generated MusicXML file is too small ({mxl_size} bytes)")
+                raise Exception(
+                    "Generated MusicXML file appears to be empty or corrupt"
+                )
+
+        except Exception as e:
+            logger.error(f"Error finding/validating MusicXML file: {str(e)}")
+            raise
+
+        # Rename to standard output name
         output_mxl_path = os.path.join(mxl_path, "output.mxl")
         try:
             os.rename(mxl_file, output_mxl_path)
@@ -107,8 +198,6 @@ def process_score(score_id, file_ext):
         # Create XML version for serving via API
         xml_output_path = None
         try:
-            import zipfile
-
             # Create XML file for serving
             xml_output_path = os.path.join(mxl_path, "output.xml")
 
@@ -148,9 +237,6 @@ def process_score(score_id, file_ext):
             output_dir = os.path.join(settings.BASE_DIR, "output")
             os.makedirs(output_dir, exist_ok=True)
 
-            # Extract XML from MXL file and save as XML
-            import zipfile
-
             destination_path = os.path.join(output_dir, f"output_{score_id}.xml")
 
             logger.info(f"About to extract and copy MusicXML file:")
@@ -169,18 +255,16 @@ def process_score(score_id, file_ext):
                 file_list = mxl_zip.namelist()
                 logger.info(f"Files in MXL: {file_list}")
 
-                # Find the main XML file (usually the largest or one without path separators)
+                # Find the main XML file
                 xml_files = [
                     f for f in file_list if f.endswith(".xml") and "/" not in f
                 ]
                 if not xml_files:
-                    # Fallback: get any XML file
                     xml_files = [f for f in file_list if f.endswith(".xml")]
 
                 if not xml_files:
                     raise Exception("No XML file found in MXL archive")
 
-                # Use the first XML file found
                 xml_filename = xml_files[0]
                 logger.info(f"Extracting XML file: {xml_filename}")
 
@@ -206,9 +290,12 @@ def process_score(score_id, file_ext):
                 f"Failed to extract and copy XML file to output directory: {str(e)}"
             )
             logger.error(f"Exception type: {type(e).__name__}")
-            import traceback
-
             logger.error(f"Traceback: {traceback.format_exc()}")
+
+        # Continue with music21 analysis...
+        logger.info(
+            f"Successfully processed {file_ext.upper()} file with score ID: {score_id}"
+        )
 
         # Analyze MusicXML with music21
         score_stream = converter.parse(output_mxl_path)
