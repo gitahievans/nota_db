@@ -367,6 +367,7 @@ class GenerateSummaryView(APIView):
                 f"- Dates, locations, and other meaningful metadata\n"
                 f"- Any other coherent, readable text content\n"
                 f"Present the extracted text in a well-organized format with clear labels (e.g., Title:, Composer:, Lyrics:, etc.)."
+                f"If possible depending on the text, try arrange the lyrics in a structured format for good readability.\n\n"
             )
 
             # Generate summary using Gemini
