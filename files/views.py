@@ -153,7 +153,7 @@ class FileUploadView(APIView):
 
                 logger.info(f"Saving file to {temp_path}")
                 try:
-                    if file_ext in ["jpg", "jpeg", "png", "tiff", "tif"]:
+                    if file_ext in ["jpg", "jpeg", "png", "tiff", "tif", "webp"]:
                         # Save original file first
                         with open(temp_path, "wb") as f:
                             for chunk in uploaded_file.chunks():

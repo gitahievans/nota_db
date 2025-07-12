@@ -52,6 +52,7 @@ class FileSerializer(serializers.ModelSerializer):
             "image/jpeg",
             "image/png",
             "image/tiff",
+            "image/tif",
             "image/webp",
         ]
         if value.content_type not in allowed_content_types:

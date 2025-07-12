@@ -201,7 +201,7 @@ def process_with_audiveris(
 
             # Run with adaptive timeout based on file size
             file_size_mb = os.path.getsize(input_path) / (1024 * 1024)
-            timeout = min(600, max(300, int(file_size_mb * 10)))
+            timeout = min(600, max(450, int(file_size_mb * 10)))
 
             result = subprocess.run(
                 audiveris_cmd,
