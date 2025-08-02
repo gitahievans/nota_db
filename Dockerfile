@@ -49,12 +49,14 @@ RUN wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip -O /tmp
     rm /tmp/gradle.zip
 ENV PATH="/opt/gradle-8.7/bin:${PATH}"
 
-# Clone and build Audiveris (cached if repo doesn't change)
+# Clone and build Audiveris from official repository (pinned for reproducibility)
 WORKDIR /app
-RUN git clone https://github.com/Nirmata-1/audiveris.git
+RUN git clone https://github.com/Audiveris/audiveris.git && \
+    cd audiveris && \
+    git checkout 5.6.3
 WORKDIR /app/audiveris
-RUN ./gradlew build && \
-    ./gradlew run --args="-help"
+RUN ./gradlew clean build --no-daemon && \
+    ./gradlew run --args="-help" --no-daemon
 
 ENV AUDIVERIS_HOME=/app/audiveris
 
