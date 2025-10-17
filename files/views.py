@@ -293,7 +293,12 @@ class GenerateSummaryView(APIView):
                 results = json.loads(results)
 
             logger.debug("Configuring Gemini API")
-            genai.configure(api_key="AIzaSyAJvW7orvp0K-_bDkQ3Ffr34IvwSd3kQ0g")
+            if not settings.GEMINI_API_KEY:
+                logger.error("GEMINI_API_KEY not set in environment")
+
+                return JsonResponse({"error": "Server configuration error"}, status=500)
+
+            genai.configure(api_key=settings.GEMINI_API_KEY)
             model = GenerativeModel("gemini-2.5-flash")
 
             # Extract key values upfront for cleaner prompt formatting and reliability

@@ -11,26 +11,28 @@ SECRET_KEY = os.environ.get("SECRET_KEY")
 
 DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
 
-#ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-
-
+print("GEMINI_API_KEY:", GEMINI_API_KEY)
 
 # Enhanced ALLOWED_HOSTS configuration
 if DEBUG:
-    ALLOWED_HOSTS = ['127.0.0.1', 'localhost', 'api.notadb.xyz',]
+    ALLOWED_HOSTS = [
+        "127.0.0.1",
+        "localhost",
+        "api.notadb.xyz",
+    ]
 else:
     # Production hosts
     allowed_hosts_env = os.environ.get("ALLOWED_HOSTS", "")
     base_hosts = [
-        'api.notadb.xyz',
-	'api.notadb.xyz:8443'
-        'notadb.xyz',
-        '5.189.190.253',  # Your VPS IP
-        'nota_web',  # Container name
-        'nota-caddy',  # Caddy container name
+        "api.notadb.xyz",
+        "api.notadb.xyz:8443" "notadb.xyz",
+        "5.189.190.253",  # Your VPS IP
+        "nota_web",  # Container name
+        "nota-caddy",  # Caddy container name
     ]
-    
+
     if allowed_hosts_env:
         env_hosts = [host.strip() for host in allowed_hosts_env.split(",")]
         ALLOWED_HOSTS = list(set(base_hosts + env_hosts))
@@ -40,7 +42,7 @@ else:
 # Add this for better security with reverse proxy
 USE_X_FORWARDED_HOST = True
 USE_X_FORWARDED_PORT = True
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 
 TEMP_STORAGE_DIR = Path("/tmp/nota")
@@ -128,7 +130,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:9002",
     "http://127.0.0.1:8000",
     "https://api.notadb.xyz",
-    "https://api.notadb.xyz:8443", 
+    "https://api.notadb.xyz:8443",
     "https://notadb.xyz",
 ]
 if not DEBUG:
@@ -149,10 +151,12 @@ CORS_ALLOW_METHODS = [
 
 # If using custom ports, also add:
 if not DEBUG:
-    CORS_ALLOWED_ORIGINS.extend([
-        "https://api.notadb.xyz:8443",
-        "http://api.notadb.xyz:8080",
-    ])
+    CORS_ALLOWED_ORIGINS.extend(
+        [
+            "https://api.notadb.xyz:8443",
+            "http://api.notadb.xyz:8080",
+        ]
+    )
 
 
 # Security settings
