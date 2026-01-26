@@ -1,4 +1,5 @@
 #!/bin/bash
 set -e
-# Start Celery worker
+
+# Wait for any necessary setup (optional)
 exec "$@"

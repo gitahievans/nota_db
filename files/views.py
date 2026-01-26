@@ -481,9 +481,12 @@ class PDFFileDetailView(APIView):
             task_status = None
             if task_id:
                 task = AsyncResult(task_id)
+                info = task.info
+                if isinstance(info, Exception):
+                    info = str(info)
                 task_status = {
                     "state": task.state,
-                    "info": task.info if task.info else None,
+                    "info": info,
                 }
             logger.info(f"Score {pk} serialized data: {serializer.data}")
             logger.info(f"Task status for score {pk}: {task_status}")

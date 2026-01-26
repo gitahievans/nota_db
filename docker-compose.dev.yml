@@ -1,0 +1,79 @@
+services:
+  db:
+    image: postgres:16
+    container_name: nota_db_dev
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: nota_db        
+      POSTGRES_USER: ${DB_USER}       
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    container_name: nota_redis_dev
+    restart: unless-stopped
+    volumes:
+      - redis_data_dev:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build: .
+    container_name: nota_web_dev
+    volumes:
+      - .:/app
+      - /app/audiveris
+      - processing_data_dev:/processing
+      - nota_tmp_dev:/tmp/nota
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - DJANGO_ENV=development
+      - DEBUG=1
+    entrypoint: ["/app/entrypoint.web.sh"]
+
+  celery:
+    build: .
+    container_name: nota_celery_dev
+    volumes:
+      - .:/app
+      - /app/audiveris
+      - processing_data_dev:/processing
+      - nota_tmp_dev:/tmp/nota
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - DJANGO_ENV=development
+      - DEBUG=1
+    entrypoint: ["/app/entrypoint.celery.sh"]
+    command: ["celery", "-A", "nota_db", "worker", "--loglevel=info"]
+
+volumes:
+  postgres_data_dev:
+  redis_data_dev:
+  processing_data_dev:
+  nota_tmp_dev:

@@ -1,7 +1,6 @@
 #!/bin/bash
 set -e
 
-
 echo "Applying migrations..."
 python manage.py makemigrations --noinput
 python manage.py migrate --noinput

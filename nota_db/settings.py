@@ -7,13 +7,11 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get("SECRET_KEY")
+SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-key-for-dev")
 
-DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
+DEBUG = os.environ.get("DEBUG", "False").lower() in ("true", "1", "yes")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-print("GEMINI_API_KEY:", GEMINI_API_KEY)
 
 # Enhanced ALLOWED_HOSTS configuration
 if DEBUG:
@@ -109,20 +107,33 @@ if DEBUG:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.environ.get("DB_NAME"),
-            "USER": os.environ.get("DB_USER"),
-            "PASSWORD": os.environ.get("DB_PASSWORD"),
-            "HOST": os.environ.get("DB_HOST"),
+            "NAME": os.environ.get("DB_NAME", "nota_db"),
+            "USER": os.environ.get("DB_USER", "postgres"),
+            "PASSWORD": os.environ.get("DB_PASSWORD", "password"),
+            "HOST": os.environ.get("DB_HOST", "db"),
             "PORT": os.environ.get("DB_PORT", "5432"),
         }
     }
 else:
     database_url = os.environ.get("DATABASE_URL")
-    DATABASES = {
-        "default": dj_database_url.parse(
-            database_url, conn_max_age=600, ssl_require=False
-        )
-    }
+    if database_url:
+        DATABASES = {
+            "default": dj_database_url.parse(
+                database_url, conn_max_age=600, ssl_require=False
+            )
+        }
+    else:
+        # Fallback to individual credentials if DATABASE_URL is missing
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.postgresql",
+                "NAME": os.environ.get("DB_NAME", "nota_db"),
+                "USER": os.environ.get("DB_USER", "postgres"),
+                "PASSWORD": os.environ.get("DB_PASSWORD", "password"),
+                "HOST": os.environ.get("DB_HOST", "db"),
+                "PORT": os.environ.get("DB_PORT", "5432"),
+            }
+        }
 
 
 CORS_ALLOWED_ORIGINS = [

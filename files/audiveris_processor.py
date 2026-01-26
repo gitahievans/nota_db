@@ -129,6 +129,10 @@ def build_audiveris_command(input_path: str, output_path: str, file_ext: str) ->
     return [
         "/opt/gradle-8.7/bin/gradle",
         "run",
+        "-x",
+        "getCommit",
+        "-x",
+        "getCommitShort",
         f"-PjvmLineArgs={memory_setting}",
         f"-PcmdLineArgs={cmd_args}",
     ]

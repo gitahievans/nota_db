@@ -6,5 +6,4 @@ staticfiles/
 media/
 .DS_Store
 docker-compose.local.yml
-.env.local
-.env.prod
+.env*

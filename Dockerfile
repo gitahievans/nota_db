@@ -1,36 +1,9 @@
-# Base Python image
-FROM python:3.13-slim-bookworm
+# Stage 1: Audiveris Builder
+FROM python:3.13-slim-bookworm as audiveris-builder
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-# Set work directory
-WORKDIR /app
-
-# Install core system dependencies (frequently updated)
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    git wget unzip zip ca-certificates \
-    fontconfig fonts-dejavu libfreetype6 \
-    tesseract-ocr tesseract-ocr-eng \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install PostgreSQL client separately for better cache isolation
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends postgresql-client && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install system dependencies for OpenCV
-RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    libgomp1 \
-    libfontconfig1 \
-    libxcb1 \
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git wget unzip java-common \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Java 21 (Temurin)
@@ -39,9 +12,7 @@ RUN mkdir -p /etc/apt/keyrings && \
     echo "deb [signed-by=/etc/apt/keyrings/adoptium.asc] https://packages.adoptium.net/artifactory/deb bookworm main" | \
     tee /etc/apt/sources.list.d/adoptium.list && \
     apt-get update && \
-    apt-get install -y --no-install-recommends temurin-21-jdk && \
-    java -version && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends temurin-21-jdk
 
 # Install Gradle 8.7
 RUN wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip -O /tmp/gradle.zip && \
@@ -49,41 +20,88 @@ RUN wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip -O /tmp
     rm /tmp/gradle.zip
 ENV PATH="/opt/gradle-8.7/bin:${PATH}"
 
-# Clone and build Audiveris from official repository (pinned for reproducibility)
+# Clone and build Audiveris
 WORKDIR /app
 RUN git clone https://github.com/Audiveris/audiveris.git && \
     cd audiveris && \
     git checkout 5.6.3
+
 WORKDIR /app/audiveris
+# Build and run help to populate Gradle cache
 RUN ./gradlew clean build --no-daemon && \
     ./gradlew run --args="-help" --no-daemon
 
-ENV AUDIVERIS_HOME=/app/audiveris
+# Stage 2: Python Dependencies Builder
+FROM python:3.13-bookworm as python-builder
 
-# Copy Python requirements early to leverage cache
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
 WORKDIR /app
+
+# Copy ONLY requirements first - this layer caches unless requirements.txt changes
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# # Explicitly install music21 if not in requirements.txt
-# RUN pip install music21
+# Build wheels for all dependencies - much faster to install later
+RUN pip install --upgrade pip && \
+    pip wheel --no-cache-dir --no-deps --wheel-dir /app/wheels -r requirements.txt
 
-# Install Docker CLI (optional, for debugging)
+# Stage 3: Final Production Image
+FROM python:3.13-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    AUDIVERIS_HOME=/app/audiveris \
+    PATH="/opt/gradle-8.7/bin:/root/.local/bin:$PATH"
+
+WORKDIR /app
+
+# Install Runtime Dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends docker.io && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    fontconfig fonts-dejavu libfreetype6 \
+    tesseract-ocr tesseract-ocr-eng \
+    postgresql-client \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    libfontconfig1 \
+    libxcb1 \
+    wget && \
+    # Install Java 21 Runtime (JDK needed for Gradle wrapper)
+    mkdir -p /etc/apt/keyrings && \
+    wget -q -O /etc/apt/keyrings/adoptium.asc https://packages.adoptium.net/artifactory/api/gpg/key/public && \
+    echo "deb [signed-by=/etc/apt/keyrings/adoptium.asc] https://packages.adoptium.net/artifactory/deb bookworm main" | \
+    tee /etc/apt/sources.list.d/adoptium.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends temurin-21-jdk && \
+    apt-get purge -y wget && \
+    apt-get autoremove -y && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Now copy the rest of the app (after dependencies so they cache better)
+# Copy Gradle (needed for running Audiveris via gradle wrapper/command)
+COPY --from=audiveris-builder /opt/gradle-8.7 /opt/gradle-8.7
+
+# Copy Audiveris application and build artifacts/cache
+COPY --from=audiveris-builder /app/audiveris /app/audiveris
+COPY --from=audiveris-builder /root/.gradle /root/.gradle
+
+# Install Python packages from pre-built wheels (MUCH faster)
+COPY --from=python-builder /app/wheels /wheels
+RUN pip install --no-cache /wheels/* && rm -rf /wheels
+
+# Copy Application Code LAST (so code changes don't invalidate dependency layers)
 COPY . .
 
-# Copy entrypoint scripts and set permissions
-COPY entrypoint.web.sh entrypoint.web.sh
-COPY entrypoint.celery.sh entrypoint.celery.sh
-COPY entrypoint.prod.sh entrypoint.prod.sh
-RUN chmod +x entrypoint.web.sh entrypoint.celery.sh entrypoint.prod.sh
-
-# Create processing directories and set permissions
-RUN mkdir -p /processing/input /processing/output && \
+# Set permissions
+RUN chmod +x entrypoint.web.sh entrypoint.celery.sh entrypoint.prod.sh && \
+    mkdir -p /processing/input /processing/output && \
     chmod -R 755 /processing/input /processing/output
 
 ENTRYPOINT ["/app/entrypoint.web.sh"]

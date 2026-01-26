@@ -3,7 +3,7 @@ services:
     image: postgres:16
     container_name: nota_db
     env_file:
-      - .env.prod
+      - .env
     environment:
       POSTGRES_DB: nota_db        
       POSTGRES_USER: ${DB_USER}       
@@ -44,7 +44,7 @@ services:
       redis:
         condition: service_healthy
     env_file:
-      - .env.prod
+      - .env
     environment:
       - DJANGO_ENV=production
       - DEBUG=${DEBUG:-0}
@@ -63,7 +63,7 @@ services:
       redis:
         condition: service_healthy
     env_file:
-      - .env.prod
+      - .env
     environment:
       - DJANGO_ENV=production
       - DEBUG=${DEBUG:-0}
