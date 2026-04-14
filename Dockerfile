@@ -20,11 +20,19 @@ RUN wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip -O /tmp
     rm /tmp/gradle.zip
 ENV PATH="/opt/gradle-8.7/bin:${PATH}"
 
-# Clone and build Audiveris
+# Download the pinned Audiveris release tarball instead of cloning the full
+# git history. This makes builds much less fragile on slower or flaky networks.
 WORKDIR /app
-RUN git clone https://github.com/Audiveris/audiveris.git && \
-    cd audiveris && \
-    git checkout 5.6.3
+RUN wget -q https://github.com/Audiveris/audiveris/archive/refs/tags/5.6.3.tar.gz -O /tmp/audiveris.tar.gz && \
+    tar -xzf /tmp/audiveris.tar.gz -C /app && \
+    mv /app/audiveris-5.6.3 /app/audiveris && \
+    cd /app/audiveris && \
+    git init && \
+    git config user.email "build@local" && \
+    git config user.name "Docker Build" && \
+    git add . && \
+    git commit -m "Vendor Audiveris 5.6.3" && \
+    rm /tmp/audiveris.tar.gz
 
 WORKDIR /app/audiveris
 # Build and run help to populate Gradle cache

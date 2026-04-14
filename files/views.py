@@ -136,6 +136,7 @@ class FileUploadView(APIView):
             logger.info("Serializer is valid")
             analyze = request.data.get("analyze", "false").lower() == "true"
             uploaded_file = request.FILES.get("file")
+            file_ext = None
 
             if not uploaded_file and analyze:
                 logger.error("No file provided for analysis")
@@ -234,12 +235,17 @@ class FileUploadView(APIView):
                 task = process_score.delay(score.id, file_ext=file_ext)
                 task_id = task.id
 
+            if uploaded_file:
+                upload_label = "Image" if file_ext and file_ext != "pdf" else "PDF"
+            else:
+                upload_label = "Record"
+
             return Response(
                 {
                     "status": "success",
                     "score_id": score.id,
                     "task_id": task_id,
-                    "message": f"{'Image' if file_ext != 'pdf' else 'PDF'} uploaded"
+                    "message": f"{upload_label} uploaded"
                     + (" and processing started" if analyze else ""),
                 },
                 status=status.HTTP_201_CREATED,
