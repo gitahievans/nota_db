@@ -25,10 +25,11 @@ else:
     allowed_hosts_env = os.environ.get("ALLOWED_HOSTS", "")
     base_hosts = [
         "api.notadb.xyz",
-        "api.notadb.xyz:8443" "notadb.xyz",
+        "api.notadb.xyz:8443",
+        "notadb.xyz",
         "5.189.190.253",  # Your VPS IP
-        "nota_web",  # Container name
-        "nota-caddy",  # Caddy container name
+        "web",  # Docker Compose service name
+        "caddy",  # Docker Compose service name
     ]
 
     if allowed_hosts_env:

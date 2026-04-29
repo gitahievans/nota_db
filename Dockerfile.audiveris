@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1.7
+
+FROM python:3.13-slim-bookworm
+
+ENV PATH="/opt/gradle-8.7/bin:${PATH}"
+
+WORKDIR /app
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    git wget unzip java-common \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    mkdir -p /etc/apt/keyrings && \
+    wget -q -O /etc/apt/keyrings/adoptium.asc https://packages.adoptium.net/artifactory/api/gpg/key/public && \
+    echo "deb [signed-by=/etc/apt/keyrings/adoptium.asc] https://packages.adoptium.net/artifactory/deb bookworm main" | \
+    tee /etc/apt/sources.list.d/adoptium.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends temurin-21-jdk
+
+RUN wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip -O /tmp/gradle.zip && \
+    unzip -d /opt /tmp/gradle.zip && \
+    rm /tmp/gradle.zip
+
+RUN wget -q https://github.com/Audiveris/audiveris/archive/refs/tags/5.6.3.tar.gz -O /tmp/audiveris.tar.gz && \
+    tar -xzf /tmp/audiveris.tar.gz -C /app && \
+    mv /app/audiveris-5.6.3 /app/audiveris && \
+    cd /app/audiveris && \
+    git init && \
+    git config user.email "build@local" && \
+    git config user.name "Docker Build" && \
+    git add . && \
+    git commit -m "Vendor Audiveris 5.6.3" && \
+    rm /tmp/audiveris.tar.gz
+
+WORKDIR /app/audiveris
+
+RUN --mount=type=cache,target=/root/.gradle,sharing=locked \
+    ./gradlew clean build --no-daemon && \
+    ./gradlew run --args="-help" --no-daemon

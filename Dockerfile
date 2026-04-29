@@ -1,50 +1,14 @@
-# Stage 1: Audiveris Builder
-FROM python:3.13-slim-bookworm as audiveris-builder
+# syntax=docker/dockerfile:1.7
 
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git wget unzip java-common \
-    && rm -rf /var/lib/apt/lists/*
+ARG AUDIVERIS_IMAGE=ghcr.io/example/notadb-audiveris:5.6.3
 
-# Install Java 21 (Temurin)
-RUN mkdir -p /etc/apt/keyrings && \
-    wget -q -O /etc/apt/keyrings/adoptium.asc https://packages.adoptium.net/artifactory/api/gpg/key/public && \
-    echo "deb [signed-by=/etc/apt/keyrings/adoptium.asc] https://packages.adoptium.net/artifactory/deb bookworm main" | \
-    tee /etc/apt/sources.list.d/adoptium.list && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends temurin-21-jdk
-
-# Install Gradle 8.7
-RUN wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip -O /tmp/gradle.zip && \
-    unzip -d /opt /tmp/gradle.zip && \
-    rm /tmp/gradle.zip
-ENV PATH="/opt/gradle-8.7/bin:${PATH}"
-
-# Download the pinned Audiveris release tarball instead of cloning the full
-# git history. This makes builds much less fragile on slower or flaky networks.
-WORKDIR /app
-RUN wget -q https://github.com/Audiveris/audiveris/archive/refs/tags/5.6.3.tar.gz -O /tmp/audiveris.tar.gz && \
-    tar -xzf /tmp/audiveris.tar.gz -C /app && \
-    mv /app/audiveris-5.6.3 /app/audiveris && \
-    cd /app/audiveris && \
-    git init && \
-    git config user.email "build@local" && \
-    git config user.name "Docker Build" && \
-    git add . && \
-    git commit -m "Vendor Audiveris 5.6.3" && \
-    rm /tmp/audiveris.tar.gz
-
-WORKDIR /app/audiveris
-# Build and run help to populate Gradle cache
-RUN ./gradlew clean build --no-daemon && \
-    ./gradlew run --args="-help" --no-daemon
+FROM ${AUDIVERIS_IMAGE} AS audiveris-assets
 
 # Stage 2: Python Dependencies Builder
-FROM python:3.13-bookworm as python-builder
+FROM python:3.13-slim-bookworm AS python-builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
@@ -52,9 +16,11 @@ WORKDIR /app
 # Copy ONLY requirements first - this layer caches unless requirements.txt changes
 COPY requirements.txt .
 
-# Build wheels for all dependencies - much faster to install later
-RUN pip install --upgrade pip && \
-    pip wheel --no-cache-dir --no-deps --wheel-dir /app/wheels -r requirements.txt
+# Install dependencies into a virtualenv we can copy directly into the final image.
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    python -m venv /opt/venv && \
+    /opt/venv/bin/pip install --upgrade pip && \
+    /opt/venv/bin/pip install -r requirements.txt
 
 # Stage 3: Final Production Image
 FROM python:3.13-slim-bookworm
@@ -62,12 +28,14 @@ FROM python:3.13-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     AUDIVERIS_HOME=/app/audiveris \
-    PATH="/opt/gradle-8.7/bin:/root/.local/bin:$PATH"
+    PATH="/opt/venv/bin:/opt/gradle-8.7/bin:/root/.local/bin:$PATH"
 
 WORKDIR /app
 
 # Install Runtime Dependencies
-RUN apt-get update && \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
     fontconfig fonts-dejavu libfreetype6 \
@@ -82,7 +50,7 @@ RUN apt-get update && \
     libfontconfig1 \
     libxcb1 \
     wget && \
-    # Install Java 21 Runtime (JDK needed for Gradle wrapper)
+# Install Java 21 Runtime (JDK needed for Gradle wrapper)
     mkdir -p /etc/apt/keyrings && \
     wget -q -O /etc/apt/keyrings/adoptium.asc https://packages.adoptium.net/artifactory/api/gpg/key/public && \
     echo "deb [signed-by=/etc/apt/keyrings/adoptium.asc] https://packages.adoptium.net/artifactory/deb bookworm main" | \
@@ -94,15 +62,13 @@ RUN apt-get update && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy Gradle (needed for running Audiveris via gradle wrapper/command)
-COPY --from=audiveris-builder /opt/gradle-8.7 /opt/gradle-8.7
+COPY --from=audiveris-assets /opt/gradle-8.7 /opt/gradle-8.7
 
 # Copy Audiveris application and build artifacts/cache
-COPY --from=audiveris-builder /app/audiveris /app/audiveris
-COPY --from=audiveris-builder /root/.gradle /root/.gradle
+COPY --from=audiveris-assets /app/audiveris /app/audiveris
 
-# Install Python packages from pre-built wheels (MUCH faster)
-COPY --from=python-builder /app/wheels /wheels
-RUN pip install --no-cache /wheels/* && rm -rf /wheels
+# Copy the prebuilt Python environment
+COPY --from=python-builder /opt/venv /opt/venv
 
 # Copy Application Code LAST (so code changes don't invalidate dependency layers)
 COPY . .

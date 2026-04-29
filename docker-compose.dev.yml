@@ -1,7 +1,6 @@
 services:
   db:
     image: postgres:16
-    container_name: nota_db_dev
     env_file:
       - .env
     environment:
@@ -19,7 +18,6 @@ services:
 
   redis:
     image: redis:7
-    container_name: nota_redis_dev
     restart: unless-stopped
     volumes:
       - redis_data_dev:/data
@@ -30,8 +28,11 @@ services:
       retries: 5
 
   web:
-    build: .
-    container_name: nota_web_dev
+    build:
+      context: .
+      args:
+        AUDIVERIS_IMAGE: ${AUDIVERIS_IMAGE:-78.46.148.127/notadb/audiveris:5.6.3}
+    image: nota_db-app:dev
     volumes:
       - .:/app
       - /app/audiveris
@@ -52,8 +53,7 @@ services:
     entrypoint: ["/app/entrypoint.web.sh"]
 
   celery:
-    build: .
-    container_name: nota_celery_dev
+    image: nota_db-app:dev
     volumes:
       - .:/app
       - /app/audiveris
