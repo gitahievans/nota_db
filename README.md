@@ -226,7 +226,7 @@ docker compose -f docker-compose.yml build web
 docker compose -f docker-compose.yml up -d db redis web celery
 ```
 
-Use `DEBUG=0`, a unique `SECRET_KEY`, deployment database credentials, and suitable host/origin settings. The current settings also contain a hardcoded OpenAI credential fallback; remove it and rotate any exposed credential before deployment. Review permissions, storage configuration, HTTPS, and cookie settings for your environment: several security settings remain disabled regardless of debug mode.
+Use `DEBUG=0`, a unique `SECRET_KEY`, deployment database credentials, and suitable host/origin settings. An OpenAI credential was previously committed to Git history; revoke or rotate that exposed credential before deployment. `OPENAI_API_KEY` is now read only from the environment. Review permissions, storage configuration, HTTPS, and cookie settings for your environment: several security settings remain disabled regardless of debug mode.
 
 ## Troubleshooting and current limitations
 

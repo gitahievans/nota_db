@@ -49,10 +49,7 @@ TEMP_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 CLEANUP_DELAY_SECONDS = 60 * 60  # 1 hour
 
-OPENAI_API_KEY = os.environ.get(
-    "OPENAI_API_KEY",
-    "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",
-)
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 
 INSTALLED_APPS = [
