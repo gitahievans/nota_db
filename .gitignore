@@ -4,6 +4,9 @@ env/
 __pycache__
 staticfiles/
 media/
+*.tar
+*.tar.gz
+*.tgz
 .DS_Store
 docker-compose.local.yml
 .env*

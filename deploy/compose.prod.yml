@@ -1,0 +1,79 @@
+name: notadb
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    env_file:
+      - ./secrets/backend.env
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  web:
+    image: ${NOTADB_IMAGE:?Set NOTADB_IMAGE in secrets/backend.env}
+    restart: unless-stopped
+    init: true
+    env_file:
+      - ./secrets/backend.env
+    environment:
+      DJANGO_ENV: production
+      DEBUG: "0"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8001:8000"
+    volumes:
+      - processing_data:/processing
+      - nota_tmp:/tmp/nota
+      - static_volume:/app/staticfiles
+    entrypoint: ["/app/entrypoint.prod.sh"]
+
+  celery:
+    image: ${NOTADB_IMAGE:?Set NOTADB_IMAGE in secrets/backend.env}
+    restart: unless-stopped
+    init: true
+    env_file:
+      - ./secrets/backend.env
+    environment:
+      DJANGO_ENV: production
+      DEBUG: "0"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - processing_data:/processing
+      - nota_tmp:/tmp/nota
+    entrypoint: ["/app/entrypoint.celery.sh"]
+    command: ["celery", "-A", "nota_db", "worker", "--loglevel=info"]
+
+volumes:
+  postgres_data:
+  redis_data:
+  processing_data:
+  nota_tmp:
+  static_volume:

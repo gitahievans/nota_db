@@ -1,6 +1,62 @@
-from rest_framework import serializers
-from .models import PDFFile, Category
 import json
+from pathlib import Path
+
+from rest_framework import serializers
+from django.conf import settings
+
+from .models import PDFFile, Category
+
+MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
+
+SUPPORTED_EXTENSIONS = {
+    "pdf": PDFFile.SOURCE_TYPE_PDF,
+    "jpg": PDFFile.SOURCE_TYPE_IMAGE,
+    "jpeg": PDFFile.SOURCE_TYPE_IMAGE,
+    "png": PDFFile.SOURCE_TYPE_IMAGE,
+    "tiff": PDFFile.SOURCE_TYPE_IMAGE,
+    "tif": PDFFile.SOURCE_TYPE_IMAGE,
+    "webp": PDFFile.SOURCE_TYPE_IMAGE,
+    "mp3": PDFFile.SOURCE_TYPE_AUDIO,
+    "wav": PDFFile.SOURCE_TYPE_AUDIO,
+    "m4a": PDFFile.SOURCE_TYPE_AUDIO,
+}
+
+SUPPORTED_MIME_TYPES = {
+    "application/pdf": PDFFile.SOURCE_TYPE_PDF,
+    "image/jpeg": PDFFile.SOURCE_TYPE_IMAGE,
+    "image/png": PDFFile.SOURCE_TYPE_IMAGE,
+    "image/tiff": PDFFile.SOURCE_TYPE_IMAGE,
+    "image/tif": PDFFile.SOURCE_TYPE_IMAGE,
+    "image/webp": PDFFile.SOURCE_TYPE_IMAGE,
+    "audio/mpeg": PDFFile.SOURCE_TYPE_AUDIO,
+    "audio/mp3": PDFFile.SOURCE_TYPE_AUDIO,
+    "audio/wav": PDFFile.SOURCE_TYPE_AUDIO,
+    "audio/x-wav": PDFFile.SOURCE_TYPE_AUDIO,
+    "audio/wave": PDFFile.SOURCE_TYPE_AUDIO,
+    "audio/vnd.wave": PDFFile.SOURCE_TYPE_AUDIO,
+    "audio/mp4": PDFFile.SOURCE_TYPE_AUDIO,
+    "audio/x-m4a": PDFFile.SOURCE_TYPE_AUDIO,
+    "video/mp4": PDFFile.SOURCE_TYPE_AUDIO,
+}
+
+FALLBACK_MIME_TYPES = {"", None, "application/octet-stream"}
+
+
+def get_extension(filename: str) -> str:
+    return Path(filename).suffix.lower().lstrip(".")
+
+
+def detect_source_type(filename: str) -> str | None:
+    return SUPPORTED_EXTENSIONS.get(get_extension(filename))
+
+
+def is_supported_upload(filename: str, content_type: str | None) -> bool:
+    source_type = detect_source_type(filename)
+    if not source_type:
+        return False
+    if content_type in FALLBACK_MIME_TYPES:
+        return True
+    return SUPPORTED_MIME_TYPES.get(content_type) == source_type
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -9,15 +65,11 @@ class CategorySerializer(serializers.ModelSerializer):
         fields = ["id", "name"]
 
 
-import json
-from rest_framework import serializers
-from .models import PDFFile, Category
-from .serializers import CategorySerializer
-
-
 class FileSerializer(serializers.ModelSerializer):
     categories = CategorySerializer(many=True, required=False)
     results = serializers.SerializerMethodField()
+    source_audio_url = serializers.SerializerMethodField()
+    playback_midi_url = serializers.SerializerMethodField()
 
     class Meta:
         model = PDFFile
@@ -33,6 +85,9 @@ class FileSerializer(serializers.ModelSerializer):
             "processed",
             "musicxml_url",
             "midi_url",
+            "source_type",
+            "source_audio_url",
+            "playback_midi_url",
         ]
 
     def get_results(self, obj):
@@ -47,23 +102,30 @@ class FileSerializer(serializers.ModelSerializer):
         return None
 
     def validate_file(self, value):
-        allowed_content_types = [
-            "application/pdf",
-            "image/jpeg",
-            "image/png",
-            "image/tiff",
-            "image/tif",
-            "image/webp",
-        ]
-        if value.content_type not in allowed_content_types:
+        if not is_supported_upload(value.name, value.content_type):
             raise serializers.ValidationError(
-                f"Only PDF, JPG, PNG, and TIFF files are allowed. Got {value.content_type}."
+                "Only PDF, JPEG, PNG, TIFF, WebP, MP3, WAV, and M4A files are allowed."
             )
-        # Optional: Add file size validation
-        max_size = 10 * 1024 * 1024  # 10MB
-        if value.size > max_size:
+        if value.size > MAX_UPLOAD_SIZE_BYTES:
             raise serializers.ValidationError("File size exceeds 10MB limit.")
         return value
+
+    def get_source_audio_url(self, obj):
+        if obj.source_type != PDFFile.SOURCE_TYPE_AUDIO:
+            return None
+        temp_dir = Path(settings.TEMP_STORAGE_DIR) / str(obj.id)
+        for candidate in temp_dir.glob("input.*"):
+            if candidate.suffix.lower() in {".mp3", ".wav", ".m4a"}:
+                return f"/api/serve-source-audio/{obj.id}/"
+        return None
+
+    def get_playback_midi_url(self, obj):
+        if obj.source_type != PDFFile.SOURCE_TYPE_AUDIO:
+            return obj.midi_url
+        preview_path = Path(settings.TEMP_STORAGE_DIR) / str(obj.id) / "preview.mid"
+        if preview_path.exists():
+            return f"/api/serve-preview-midi/{obj.id}/"
+        return obj.midi_url
 
     def create(self, validated_data):
         categories_data = validated_data.pop("categories", [])
@@ -97,8 +159,14 @@ class FileSerializer(serializers.ModelSerializer):
         return instance
 
     def to_internal_value(self, data):
-        data = data.copy()
         categories_data = data.get("categories")
         if categories_data and isinstance(categories_data[0], str):
-            data["categories"] = [{"name": name} for name in categories_data]
+            normalized_data = {
+                key: data.getlist(key) if hasattr(data, "getlist") else value
+                for key, value in data.items()
+            }
+            normalized_data["categories"] = [
+                {"name": name} for name in categories_data
+            ]
+            return super().to_internal_value(normalized_data)
         return super().to_internal_value(data)

@@ -11,6 +11,11 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-key-for-dev")
 
 DEBUG = os.environ.get("DEBUG", "False").lower() in ("true", "1", "yes")
 
+
+def env_list(name, default=()):
+    value = os.environ.get(name, "")
+    return [item.strip() for item in value.split(",") if item.strip()] or list(default)
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Enhanced ALLOWED_HOSTS configuration
@@ -21,22 +26,11 @@ if DEBUG:
         "api.notadb.xyz",
     ]
 else:
-    # Production hosts
-    allowed_hosts_env = os.environ.get("ALLOWED_HOSTS", "")
     base_hosts = [
-        "api.notadb.xyz",
-        "api.notadb.xyz:8443",
-        "notadb.xyz",
-        "5.189.190.253",  # Your VPS IP
-        "web",  # Docker Compose service name
-        "caddy",  # Docker Compose service name
+        "api.scorelearn.site",
+        "web",
     ]
-
-    if allowed_hosts_env:
-        env_hosts = [host.strip() for host in allowed_hosts_env.split(",")]
-        ALLOWED_HOSTS = list(set(base_hosts + env_hosts))
-    else:
-        ALLOWED_HOSTS = base_hosts
+    ALLOWED_HOSTS = list(set(base_hosts + env_list("ALLOWED_HOSTS")))
 
 # Add this for better security with reverse proxy
 USE_X_FORWARDED_HOST = True
@@ -49,10 +43,7 @@ TEMP_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 CLEANUP_DELAY_SECONDS = 60 * 60  # 1 hour
 
-OPENAI_API_KEY = os.environ.get(
-    "OPENAI_API_KEY",
-    "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",
-)
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 
 INSTALLED_APPS = [
@@ -138,12 +129,9 @@ else:
 
 
 CORS_ALLOWED_ORIGINS = [
-    "https://nota-db-git-main-gitahievans-projects.vercel.app",
     "http://localhost:9002",
-    "http://127.0.0.1:8000",
-    "https://api.notadb.xyz",
-    "https://api.notadb.xyz:8443",
-    "https://notadb.xyz",
+    "http://127.0.0.1:9002",
+    "https://scorelearn.site",
 ]
 if not DEBUG:
     production_url = os.environ.get("PRODUCTION_URL", "")
@@ -161,26 +149,20 @@ CORS_ALLOW_METHODS = [
 ]
 
 
-# If using custom ports, also add:
-if not DEBUG:
-    CORS_ALLOWED_ORIGINS.extend(
-        [
-            "https://api.notadb.xyz:8443",
-            "http://api.notadb.xyz:8080",
-        ]
-    )
+CSRF_TRUSTED_ORIGINS = env_list(
+    "CSRF_TRUSTED_ORIGINS",
+    ["https://api.scorelearn.site", "https://scorelearn.site"],
+)
 
 
 # Security settings
-SECURE_SSL_REDIRECT = (
-    False  # Disable in development, will be handled by Caddy in production
-)
-SESSION_COOKIE_SECURE = False  # Disable in development, will be handled in production
-CSRF_COOKIE_SECURE = False  # Disable in development, will be handled in production
+SECURE_SSL_REDIRECT = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_SAMESITE = "Lax"
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
-SECURE_HSTS_SECONDS = 0  # Disable HSTS in development
+SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = False
 SECURE_HSTS_PRELOAD = False
 X_FRAME_OPTIONS = "DENY"
@@ -221,7 +203,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY")
-AWS_STORAGE_BUCKET_NAME = "nota-pdfs"
+AWS_STORAGE_BUCKET_NAME = os.environ.get("AWS_STORAGE_BUCKET_NAME", "nota-pdfs")
 AWS_S3_SIGNATURE_VERSION = "s3v4"
 AWS_S3_REGION_NAME = "auto"
 AWS_S3_FILE_OVERWRITE = False
@@ -235,7 +217,7 @@ DEFAULT_FILE_STORAGE = "files.storage.PDFFileStorage"
 
 # Media files configuration
 MEDIA_URL = (
-    f"https://{os.environ.get('AWS_STORAGE_BUCKET_NAME')}.r2.cloudflarestorage.com/"
+    f"https://{AWS_STORAGE_BUCKET_NAME}.r2.cloudflarestorage.com/"
 )
 MEDIA_ROOT = BASE_DIR / "media" if DEBUG else None
 

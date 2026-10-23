@@ -19,6 +19,15 @@ class Category(models.Model):
 
 
 class PDFFile(models.Model):
+    SOURCE_TYPE_PDF = "pdf"
+    SOURCE_TYPE_IMAGE = "image"
+    SOURCE_TYPE_AUDIO = "audio"
+    SOURCE_TYPE_CHOICES = [
+        (SOURCE_TYPE_PDF, "PDF"),
+        (SOURCE_TYPE_IMAGE, "Image"),
+        (SOURCE_TYPE_AUDIO, "Audio"),
+    ]
+
     title = models.CharField(max_length=100)
     lyrics = models.TextField(null=True, blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
@@ -33,6 +42,11 @@ class PDFFile(models.Model):
     musicxml_url = models.URLField(max_length=2000, null=True, blank=True)
     midi_url = models.URLField(max_length=2000, null=True, blank=True)
     summary = models.TextField(null=True, blank=True)
+    source_type = models.CharField(
+        max_length=10,
+        choices=SOURCE_TYPE_CHOICES,
+        default=SOURCE_TYPE_PDF,
+    )
 
     def __str__(self):
         return f"{self.title} - {self.composer}"

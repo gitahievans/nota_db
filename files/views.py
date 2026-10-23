@@ -21,6 +21,7 @@ from langchain.prompts import PromptTemplate
 from django.http import JsonResponse
 import json
 import os
+import mimetypes
 from django.conf import settings
 from google.generativeai import GenerativeModel, configure
 import google.generativeai as genai
@@ -28,6 +29,7 @@ from PIL import Image, ImageEnhance
 import cv2
 import numpy as np
 from .text_extraction import TextExtractor
+from .serializers import detect_source_type
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +139,7 @@ class FileUploadView(APIView):
             analyze = request.data.get("analyze", "false").lower() == "true"
             uploaded_file = request.FILES.get("file")
             file_ext = None
+            source_type = None
 
             if not uploaded_file and analyze:
                 logger.error("No file provided for analysis")
@@ -145,11 +148,17 @@ class FileUploadView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+            if uploaded_file:
+                file_ext = uploaded_file.name.split(".")[-1].lower()
+                source_type = detect_source_type(uploaded_file.name)
+
             if analyze:
-                score = serializer.save(file=None)
+                score = serializer.save(
+                    file=None,
+                    source_type=source_type or PDFFile.SOURCE_TYPE_PDF,
+                )
                 temp_dir = settings.TEMP_STORAGE_DIR / str(score.id)
                 temp_dir.mkdir(parents=True, exist_ok=True)
-                file_ext = uploaded_file.name.split(".")[-1].lower()
                 temp_path = temp_dir / f"input.{file_ext}"
 
                 logger.info(f"Saving file to {temp_path}")
@@ -177,6 +186,10 @@ class FileUploadView(APIView):
                         with open(temp_path, "wb") as f:
                             for chunk in uploaded_file.chunks():
                                 f.write(chunk)
+                    elif source_type == PDFFile.SOURCE_TYPE_AUDIO:
+                        with open(temp_path, "wb") as f:
+                            for chunk in uploaded_file.chunks():
+                                f.write(chunk)
                     else:
                         logger.error(f"Unsupported file format: {file_ext}")
                         return Response(
@@ -197,46 +210,57 @@ class FileUploadView(APIView):
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     )
             else:
-                score = serializer.save()
+                score = serializer.save(
+                    source_type=source_type or PDFFile.SOURCE_TYPE_PDF
+                )
 
             if analyze:
-                # Extract text before/alongside music processing
-                text_extractor = TextExtractor()
-                logger.info("Starting text extraction...")
-
-                try:
-                    extracted_text = text_extractor.extract_from_file(
-                        temp_path, file_ext
-                    )
-
-                    # Store text extraction results temporarily
-                    text_results_path = temp_dir / "text_results.json"
+                text_results_path = temp_dir / "text_results.json"
+                if source_type == PDFFile.SOURCE_TYPE_AUDIO:
+                    extracted_text = {
+                        "status": "not_applicable",
+                        "message": "Text extraction is not applicable to audio uploads.",
+                    }
                     with open(text_results_path, "w", encoding="utf-8") as f:
-                        import json
-
                         json.dump(extracted_text, f, ensure_ascii=False, indent=2)
+                else:
+                    text_extractor = TextExtractor()
+                    logger.info("Starting text extraction...")
 
-                    logger.info(f"Text extraction completed: {extracted_text}")
+                    try:
+                        extracted_text = text_extractor.extract_from_file(
+                            temp_path, file_ext
+                        )
 
-                except Exception as e:
-                    logger.error(f"Text extraction failed: {str(e)}")
-                    extracted_text = {"error": f"Text extraction failed: {str(e)}"}
+                        with open(text_results_path, "w", encoding="utf-8") as f:
+                            json.dump(extracted_text, f, ensure_ascii=False, indent=2)
 
-                    # Still save the error for debugging
-                    text_results_path = temp_dir / "text_results.json"
-                    with open(text_results_path, "w", encoding="utf-8") as f:
-                        import json
+                        logger.info(f"Text extraction completed: {extracted_text}")
 
-                        json.dump(extracted_text, f, ensure_ascii=False, indent=2)
+                    except Exception as e:
+                        logger.error(f"Text extraction failed: {str(e)}")
+                        extracted_text = {"error": f"Text extraction failed: {str(e)}"}
+
+                        with open(text_results_path, "w", encoding="utf-8") as f:
+                            json.dump(extracted_text, f, ensure_ascii=False, indent=2)
 
             logger.info(f"Uploaded score ID: {score.id}")
             task_id = None
             if analyze:
-                task = process_score.delay(score.id, file_ext=file_ext)
+                task = process_score.delay(
+                    score.id,
+                    file_ext=file_ext,
+                    source_type=source_type or score.source_type,
+                )
                 task_id = task.id
 
             if uploaded_file:
-                upload_label = "Image" if file_ext and file_ext != "pdf" else "PDF"
+                if source_type == PDFFile.SOURCE_TYPE_AUDIO:
+                    upload_label = "Audio file"
+                elif source_type == PDFFile.SOURCE_TYPE_IMAGE:
+                    upload_label = "Image"
+                else:
+                    upload_label = "PDF"
             else:
                 upload_label = "Record"
 
@@ -339,6 +363,7 @@ class GenerateSummaryView(APIView):
             # Extract text content for cleaning
             text_content = results.get("text_content", {})
             other_text = text_content.get("other_text", [])
+            text_not_applicable = text_content.get("status") == "not_applicable"
 
             # Format prompt with direct data references
             prompt = (
@@ -362,24 +387,28 @@ class GenerateSummaryView(APIView):
                 f"but only after explaining the analysis results.\n\n"
                 f"Keep the explanation concise (150-200 words), avoid jargon unless explained, and ensure the tone is "
                 f"encouraging and educational for a beginner. Focus on the meaningful musical content and ignore visualization data.\n\n"
-                f"5. **Text Cleaning Task**: The OCR text extraction produced some gibberish mixed with meaningful text. "
-                f"Here is the raw extracted text that needs cleaning:\n{other_text}\n\n"
-                f"After your music theory summary, add a section titled '--- EXTRACTED TEXT ---' and provide only the "
-                f"meaningful, readable text from the extraction. Remove:\n"
-                f"- Unicode musical symbols and notation artifacts\n"
-                f"- Fragmented words and incomplete phrases\n"
-                f"- Repetitive patterns and spacing artifacts\n"
-                f"- Musical notation gibberish\n"
-                f"Keep only:\n"
-                f"- Complete song titles\n"
-                f"- Composer/author names\n"
-                f"- Complete lyrics or verse text\n"
-                f"- Performance instructions in clear language\n"
-                f"- Dates, locations, and other meaningful metadata\n"
-                f"- Any other coherent, readable text content\n"
-                f"Present the extracted text in a well-organized format with clear labels (e.g., Title:, Composer:, Lyrics:, etc.)."
-                f"If possible depending on the text, try arrange the lyrics in a structured format for good readability.\n\n"
             )
+
+            if not text_not_applicable:
+                prompt += (
+                    f"5. **Text Cleaning Task**: The OCR text extraction produced some gibberish mixed with meaningful text. "
+                    f"Here is the raw extracted text that needs cleaning:\n{other_text}\n\n"
+                    f"After your music theory summary, add a section titled '--- EXTRACTED TEXT ---' and provide only the "
+                    f"meaningful, readable text from the extraction. Remove:\n"
+                    f"- Unicode musical symbols and notation artifacts\n"
+                    f"- Fragmented words and incomplete phrases\n"
+                    f"- Repetitive patterns and spacing artifacts\n"
+                    f"- Musical notation gibberish\n"
+                    f"Keep only:\n"
+                    f"- Complete song titles\n"
+                    f"- Composer/author names\n"
+                    f"- Complete lyrics or verse text\n"
+                    f"- Performance instructions in clear language\n"
+                    f"- Dates, locations, and other meaningful metadata\n"
+                    f"- Any other coherent, readable text content\n"
+                    f"Present the extracted text in a well-organized format with clear labels (e.g., Title:, Composer:, Lyrics:, etc.)."
+                    f"If possible depending on the text, try arrange the lyrics in a structured format for good readability.\n\n"
+                )
 
             # Generate summary using Gemini
             try:
@@ -471,6 +500,54 @@ class ServeMIDIView(View):
             return HttpResponse(status=500, content=f"Error serving file: {str(e)}")
 
 
+class ServePreviewMIDIView(View):
+    def get(self, request, score_id):
+        file_path = settings.TEMP_STORAGE_DIR / f"{score_id}/preview.mid"
+        if not file_path.exists():
+            logger.error(f"Preview MIDI file not found at {file_path}")
+            return HttpResponse(status=404, content="Preview MIDI file not found")
+        try:
+            return FileResponse(
+                open(file_path, "rb"),
+                content_type="audio/midi",
+                as_attachment=False,
+            )
+        except Exception as e:
+            logger.error(f"Failed to serve preview MIDI for score {score_id}: {str(e)}")
+            return HttpResponse(status=500, content=f"Error serving file: {str(e)}")
+
+
+class ServeSourceAudioView(View):
+    def get(self, request, score_id):
+        score = get_object_or_404(PDFFile, id=score_id)
+        if score.source_type != PDFFile.SOURCE_TYPE_AUDIO:
+            return HttpResponse(status=404, content="Source audio not available")
+
+        temp_dir = settings.TEMP_STORAGE_DIR / str(score_id)
+        audio_file = next(
+            (
+                candidate
+                for candidate in temp_dir.glob("input.*")
+                if candidate.suffix.lower() in {".mp3", ".wav", ".m4a"}
+            ),
+            None,
+        )
+        if not audio_file or not audio_file.exists():
+            logger.error(f"Source audio file not found for score {score_id}")
+            return HttpResponse(status=404, content="Source audio file not found")
+
+        content_type, _ = mimetypes.guess_type(str(audio_file))
+        try:
+            return FileResponse(
+                open(audio_file, "rb"),
+                content_type=content_type or "audio/mpeg",
+                as_attachment=False,
+            )
+        except Exception as e:
+            logger.error(f"Failed to serve source audio for score {score_id}: {str(e)}")
+            return HttpResponse(status=500, content=f"Error serving file: {str(e)}")
+
+
 class PDFListView(APIView):
     def get(self, request):
         files = PDFFile.objects.all()
@@ -488,7 +565,9 @@ class PDFFileDetailView(APIView):
             if task_id:
                 task = AsyncResult(task_id)
                 info = task.info
-                if isinstance(info, Exception):
+                if task.state == "FAILURE" and isinstance(score.results, dict):
+                    info = score.results
+                elif isinstance(info, Exception):
                     info = str(info)
                 task_status = {
                     "state": task.state,

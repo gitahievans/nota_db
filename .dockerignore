@@ -14,6 +14,7 @@ env/
 venv/
 node_modules/
 output/
+*.tar
 processing/
 nota_tmp/
 staticfiles/

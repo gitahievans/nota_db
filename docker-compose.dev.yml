@@ -31,7 +31,7 @@ services:
     build:
       context: .
       args:
-        AUDIVERIS_IMAGE: ${AUDIVERIS_IMAGE:-78.46.148.127/notadb/audiveris:5.6.3}
+        AUDIVERIS_IMAGE: ${AUDIVERIS_IMAGE:-registry.ladyshelf.site/notadb/audiveris:5.6.3}
     image: nota_db-app:dev
     volumes:
       - .:/app

@@ -8,6 +8,8 @@ from .views import (
     PDFFileDetailView,
     ServeMIDIView,
     ServeMusicXMLView,
+    ServePreviewMIDIView,
+    ServeSourceAudioView,
     GenerateSummaryView,
 )
 
@@ -24,5 +26,15 @@ urlpatterns = [
         name="serve_musicxml",
     ),
     path("serve-midi/<int:score_id>/", ServeMIDIView.as_view(), name="serve_midi"),
+    path(
+        "serve-preview-midi/<int:score_id>/",
+        ServePreviewMIDIView.as_view(),
+        name="serve_preview_midi",
+    ),
+    path(
+        "serve-source-audio/<int:score_id>/",
+        ServeSourceAudioView.as_view(),
+        name="serve_source_audio",
+    ),
     path("generate-summary/", GenerateSummaryView.as_view(), name="generate_summary"),
 ]

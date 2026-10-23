@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1.7
 
-ARG AUDIVERIS_IMAGE=ghcr.io/example/notadb-audiveris:5.6.3
+ARG AUDIVERIS_IMAGE=registry.ladyshelf.site/notadb/audiveris:5.6.3
 
 FROM ${AUDIVERIS_IMAGE} AS audiveris-assets
 
 # Stage 2: Python Dependencies Builder
-FROM python:3.13-slim-bookworm AS python-builder
+FROM python:3.11-slim-bookworm AS python-builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     /opt/venv/bin/pip install -r requirements.txt
 
 # Stage 3: Final Production Image
-FROM python:3.13-slim-bookworm
+FROM python:3.11-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -49,6 +49,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libgomp1 \
     libfontconfig1 \
     libxcb1 \
+    ffmpeg \
+    libsndfile1 \
     wget && \
 # Install Java 21 Runtime (JDK needed for Gradle wrapper)
     mkdir -p /etc/apt/keyrings && \
