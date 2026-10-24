@@ -72,6 +72,23 @@ services:
     entrypoint: ["/app/entrypoint.celery.sh"]
     command: ["celery", "-A", "nota_db", "worker", "--loglevel=info"]
 
+  analysis-cleanup:
+    image: nota_db-app:dev
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      - DJANGO_ENV=development
+      - DEBUG=1
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - nota_tmp_dev:/tmp/nota
+    entrypoint: ["python", "manage.py", "cleanup_analyses", "--loop", "--interval", "60"]
+
 volumes:
   postgres_data_dev:
   redis_data_dev:

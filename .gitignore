@@ -10,3 +10,5 @@ media/
 .DS_Store
 docker-compose.local.yml
 .env*
+.venv-p1/
+tests/.runtime/

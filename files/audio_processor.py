@@ -23,8 +23,7 @@ def transcribe_audio_to_musicxml(
 
     temp_dir = settings.TEMP_STORAGE_DIR / str(score_id)
     temp_dir.mkdir(parents=True, exist_ok=True)
-    raw_midi_path = temp_dir / "basic_pitch_raw.mid"
-    preview_midi_path = temp_dir / "preview.mid"
+    raw_midi_path = temp_dir / "preview.mid"
     output_xml_path = temp_dir / "output.xml"
 
     try:
@@ -47,7 +46,6 @@ def transcribe_audio_to_musicxml(
         raise RuntimeError("Basic Pitch did not return a MIDI transcription.")
 
     midi_data.write(str(raw_midi_path))
-    midi_data.write(str(preview_midi_path))
     logger.info("Saved raw Basic Pitch MIDI to %s", raw_midi_path)
 
     if progress_callback:

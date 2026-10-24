@@ -41,7 +41,16 @@ class PDFFile(models.Model):
     processed = models.BooleanField(default=False, blank=True, null=True)
     musicxml_url = models.URLField(max_length=2000, null=True, blank=True)
     midi_url = models.URLField(max_length=2000, null=True, blank=True)
+    analysis_task_id = models.CharField(max_length=255, null=True, blank=True, editable=False)
+    job_state = models.CharField(max_length=20, default="", blank=True, editable=False)
+    job_stage = models.CharField(max_length=64, default="", blank=True, editable=False)
+    job_updated_at = models.DateTimeField(null=True, blank=True, editable=False)
     summary = models.TextField(null=True, blank=True)
+    # Empty historical ownership is deliberately not inferred from source_type.
+    retention_kind = models.CharField(max_length=16, default="legacy", editable=False, db_index=True)
+    terminal_at = models.DateTimeField(null=True, blank=True, editable=False)
+    expires_at = models.DateTimeField(null=True, blank=True, editable=False, db_index=True)
+    deletion_pending = models.BooleanField(default=False, editable=False)
     source_type = models.CharField(
         max_length=10,
         choices=SOURCE_TYPE_CHOICES,

@@ -1,7 +1,6 @@
 import subprocess
 import os
 import logging
-import zipfile
 import tempfile
 import shutil
 import psutil
@@ -11,10 +10,52 @@ from typing import Optional, Tuple
 from django.conf import settings
 from django.core.cache import cache
 import traceback
+from .outcomes import RECOGNITION_FAILURE_MESSAGE
 
 logger = logging.getLogger(__name__)
 
 AUDIVERIS_HOME = "/app/audiveris"
+DIAGNOSTIC_BYTES = 128 * 1024
+
+
+class RecognitionError(RuntimeError):
+    """Allowlisted public recognition failure; diagnostic details stay server-side."""
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+        self.public_message = message
+
+
+def recognition_failure(details):
+    if "No abscissa computable for StaffBarlineInter" in details:
+        return RecognitionError("recognition_barline_error", RECOGNITION_FAILURE_MESSAGE)
+    if "Could not export since transcription did not complete successfully" in details:
+        return RecognitionError("recognition_incomplete", RECOGNITION_FAILURE_MESSAGE)
+    return RecognitionError("recognition_no_output", RECOGNITION_FAILURE_MESSAGE)
+
+
+def write_diagnostic(path, value):
+    try:
+        payload = value if isinstance(value, bytes) else str(value or "").encode("utf-8", errors="replace")
+        Path(path).write_bytes(payload[-DIAGNOSTIC_BYTES:])
+    except OSError:
+        logger.exception("Could not write recognition diagnostics")
+
+
+def retain_failure_logs(workspace, session_dir):
+    """Bounded private logs inherit the session's lifetime; never retain OMR/score copies."""
+    try:
+        target = Path(session_dir) / "diagnostics" / "recognition"
+        target.mkdir(parents=True, exist_ok=True)
+        candidates = sorted(Path(workspace).glob("*.log"))[:4]
+        for index, source in enumerate(candidates):
+            if source.is_symlink() or not source.is_file():
+                continue
+            with source.open("rb") as handle:
+                handle.seek(max(0, source.stat().st_size - DIAGNOSTIC_BYTES))
+                (target / f"log-{index}.log").write_bytes(handle.read(DIAGNOSTIC_BYTES))
+    except OSError:
+        logger.exception("Could not retain recognition diagnostics; original failure preserved")
 
 
 # Configuration for dynamic resource allocation
@@ -56,9 +97,15 @@ def temp_workspace(score_id: str):
     """Create and manage temporary workspace for processing"""
     temp_dir = None
     try:
-        temp_dir = tempfile.mkdtemp(prefix=f"audiveris_{score_id}_")
+        session_dir = Path(settings.TEMP_STORAGE_DIR) / str(score_id)
+        session_dir.mkdir(parents=True, exist_ok=True)
+        temp_dir = tempfile.mkdtemp(prefix="audiveris_", dir=session_dir)
         logger.info(f"Created temporary workspace: {temp_dir}")
         yield temp_dir
+    except Exception:
+        if temp_dir:
+            retain_failure_logs(temp_dir, session_dir)
+        raise
     finally:
         if temp_dir and os.path.exists(temp_dir):
             try:
@@ -139,35 +186,9 @@ def build_audiveris_command(input_path: str, output_path: str, file_ext: str) ->
 
 
 def extract_xml_from_mxl(mxl_path: str, output_xml_path: str) -> None:
-    """Efficiently extract XML from MXL file"""
-    try:
-        with zipfile.ZipFile(mxl_path, "r") as mxl_zip:
-            file_list = mxl_zip.namelist()
-
-            # Find XML files (prefer root level files)
-            xml_files = [f for f in file_list if f.endswith(".xml") and "/" not in f]
-            if not xml_files:
-                xml_files = [f for f in file_list if f.endswith(".xml")]
-
-            if not xml_files:
-                raise Exception("No XML file found in MXL archive")
-
-            xml_filename = xml_files[0]
-            logger.info(f"Extracting XML file: {xml_filename}")
-
-            # Direct extraction without intermediate steps
-            mxl_zip.extract(xml_filename, os.path.dirname(output_xml_path))
-
-            # Rename to expected output name if needed
-            extracted_path = os.path.join(
-                os.path.dirname(output_xml_path), xml_filename
-            )
-            if extracted_path != output_xml_path:
-                os.rename(extracted_path, output_xml_path)
-
-    except Exception as e:
-        logger.error(f"Failed to extract XML from MXL: {str(e)}")
-        raise
+    """Extract the declared score root, never container.xml or arbitrary members."""
+    from .artifacts import notation_bytes
+    Path(output_xml_path).write_bytes(notation_bytes(mxl_path))
 
 
 def process_with_audiveris(
@@ -216,17 +237,23 @@ def process_with_audiveris(
                 timeout=timeout,
             )
 
-            logger.info(f"Audiveris processing completed successfully")
+            write_diagnostic(Path(temp_dir) / "stdout.log", result.stdout)
+            write_diagnostic(Path(temp_dir) / "stderr.log", result.stderr)
+            logger.info("Audiveris process exited; checking for exported notation")
             if result.stderr:
                 logger.warning(f"Audiveris stderr: {result.stderr}")
 
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
+            write_diagnostic(Path(temp_dir) / "stdout.log", exc.stdout)
+            write_diagnostic(Path(temp_dir) / "stderr.log", exc.stderr)
             logger.error(f"Audiveris processing timed out for score {score_id}")
             raise Exception(
                 f"Processing timed out after {timeout} seconds. "
                 "File may be too complex or large for current system resources."
             )
         except subprocess.CalledProcessError as e:
+            write_diagnostic(Path(temp_dir) / "stdout.log", e.stdout)
+            write_diagnostic(Path(temp_dir) / "stderr.log", e.stderr)
             logger.error(f"Audiveris failed with return code {e.returncode}")
             logger.error(f"Stderr: {e.stderr}")
 
@@ -261,10 +288,7 @@ def process_with_audiveris(
             logger.error(
                 f"No MusicXML files generated. Files in temp directory: {all_files}"
             )
-            raise Exception(
-                "No MusicXML files generated. This usually means the image quality "
-                "is insufficient for music recognition."
-            )
+            raise recognition_failure((result.stdout or "") + "\n" + (result.stderr or ""))
 
         temp_mxl_path = os.path.join(temp_dir, mxl_files[0])
 
@@ -293,22 +317,7 @@ def process_with_audiveris(
             logger.error(f"Failed to create XML file for serving: {str(e)}")
             final_xml_path = None
 
-        # Copy to output directory for compatibility
-        try:
-            output_dir = Path(settings.BASE_DIR) / "output"
-            output_dir.mkdir(exist_ok=True)
-            destination_path = output_dir / f"output_{score_id}.xml"
-
-            if final_xml_path and os.path.exists(final_xml_path):
-                shutil.copy2(final_xml_path, destination_path)
-                logger.info(f"Successfully copied XML file to: {destination_path}")
-            else:
-                # Fallback: extract directly to destination
-                extract_xml_from_mxl(str(final_mxl_path), str(destination_path))
-                logger.info(f"Successfully extracted XML file to: {destination_path}")
-
-        except Exception as e:
-            logger.error(f"Failed to copy XML file to output directory: {str(e)}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
+        # Session artifacts stay under TEMP_STORAGE_DIR/<id>; no compatibility
+        # copy outside the session is needed by any artifact route.
 
     return str(final_mxl_path), str(final_xml_path) if final_xml_path else None

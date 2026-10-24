@@ -32,7 +32,7 @@ Important files:
 - `views.py`: upload, list, detail, update, MusicXML, MIDI, AI summary
 - `tasks.py`: Celery orchestration
 - `audiveris_processor.py`: runs Audiveris and extracts MusicXML
-- `music21_analyzer.py`: parses `.mxl`, creates analysis JSON, writes MIDI
+- `music21_analyzer.py`: parses canonical `output.xml`, creates analysis JSON, writes default MIDI
 - `text_extraction.py`: PDF/image text extraction
 
 Infrastructure/config:
@@ -144,8 +144,8 @@ Entry point:
 Current behavior:
 
 1. Load `/tmp/nota/<id>/input.<ext>`
-2. Run `process_with_audiveris(...)`
-3. Run `analyze_with_music21(...)`
+2. PDF/image: run Audiveris and preserve its declared MusicXML root; audio: run Basic Pitch and reconstruct an explicitly approximate draft
+3. Materialize canonical `output.xml`; analyze this served file and export MIDI from a separate parse/deep copy
 4. Save `results`
 5. Set `processed`
 6. Schedule temp cleanup after `CLEANUP_DELAY_SECONDS`
@@ -188,7 +188,7 @@ Responsibilities:
 - validate file size
 - move generated `.mxl`
 - extract `.xml`
-- copy XML into `nota_db/output/`
+- retain session-owned MXL/XML under `/tmp/nota/<id>/`; no new compatibility XML copies in `output/`
 
 Current notable behavior:
 
@@ -384,3 +384,109 @@ Mental model:
 - Audiveris = OMR conversion
 - music21 = structured music analysis
 - Next.js = upload, polling, rendering
+
+
+## P2 artifact contract (2026-10-23)
+
+`results.artifacts` version 1 declares ownership, lineage, notation quality, paths
+relative to `TEMP_STORAGE_DIR/<analysis_id>`, canonical SHA-256, and playback limits.
+Recognized XML and displayed XML share `output.xml`; audio draft notation and
+displayed XML also share this location. Default MIDI `<id>.mid` always derives
+from that file. `playback_midi_url` now selects canonical MIDI for audio too.
+`raw_preview_midi_url` is an additive, separately labelled audio comparison URL;
+`source_audio_url` still serves the original recording. `preview.mid` contains the
+raw Basic Pitch transcription; no duplicate `basic_pitch_raw.mid` is created.
+On export failure, `midi_url` and default playback are null, `results.playback`
+contains status/error, and stale/partial canonical MIDI is removed. Raw preview is
+never a fallback. Broader component outcomes/completion semantics remain P5.
+
+OMR `score_cleanup.applied` is false; recognition quality remains unverified.
+Audio staves, synthesis instrument, meter/tempo context are inferred choices,
+not written facts from a recording. Pitch-based SATB suggestions live separately
+in `inferred_part_roles`; written part names are preserved. No universal playback
+synchronization is promised; repeat/ending, percussion, transposing-instrument
+synchronization and recording alignment are unsupported pending validation.
+See `tests/P2_EVIDENCE.md` and `tests/ARTIFACTS.md` for evidence and ownership.
+
+## P3 musical identity contract (2026-10-23)
+
+`results.musical_identity` schema 1 indexes exact canonical XML with deterministic
+part/measure/direct-note ordinals scoped to its SHA-256 artifact revision. Positions
+are rational quarter-note strings; measure labels remain separate from identity.
+Written pitches, chromatic/octave sounding transposition, independent voices/staves,
+chord members, tie links and anchored context are explicit. Analytical legacy
+findings have revision-scoped spans in `analysis_references`. Grand-staff music21
+PartStaff streams map back to the source XML part and staff.
+
+Linear tie occurrences are symbolic; repeats/endings/jumps and ambiguous OSMD joins
+report unavailable/unsupported. No universal MIDI or original-audio synchronization
+is promised. Bounds fail explicitly without partial identity arrays. Missing
+context is not replaced by guessed key/meter/tempo in the new index. Legacy tempo,
+key and full harmony corrections remain P4; component completion remains P5.
+See `tests/IDENTITY_API.md` for the exact XML/OSMD 1.9.0 join, scope, bounds and API
+examples; `tests/P3_EVIDENCE.md` for actual checks and remaining runtime gaps. P2
+remains VERIFY. Frontend inspection was read-only; no selection/playhead feature
+or migration was introduced.
+
+
+## P4 key, tempo and harmony (2026-10-23)
+
+P4 is implemented using P3 revision-scoped references. This supersedes the P3
+handoff's deferred P4 statements above. `key_analysis` separates written signatures
+(and scoped changes) from a whole-score Krumhansl-Schmuckler estimate; correlation
+is not calibrated confidence. Legacy `key` explicitly labels an estimate. Audio
+notation's key/tempo context is inferred draft metadata, not recording facts.
+`accidental_observations` includes chord members and distinguishes XML signs from
+pitch alteration; older notable-element counts are not printed-symbol counts.
+
+Legacy `tempo` is a display string for AnalysisResults' direct React child.
+`tempo_analysis` retains units/dots/numbers, normalized quarter BPM, marking IDs,
+locations, conflicts and separate lexical text suggestions/export default.
+`harmony` reports complete simultaneous sounding collections with event members,
+spans, observed spelling and tentative triad/seventh root/bass/inversion. Legacy
+`chords` retains string `pitch`/numeric `offset`, now combined across parts and
+uncapped within explicit resource bounds. No harmonic-function/progression engine
+or repeat expansion is implied. Summary prompts preserve these distinctions.
+
+API examples and frontend wording/transport follow-ups: `tests/ANALYSIS_API.md`.
+Checks, runtime gaps and next action: `tests/P4_EVIDENCE.md`. P2 remains VERIFY;
+P5/P6 remain unimplemented. No frontend changes or deployment were performed.
+
+### P5 reliability addendum (2026-10-23)
+
+P5.1-P5.9 completed for the supported backend orchestration contract. New results
+schema 2 adds component outcomes without changing P2 artifact version 1, P3
+identity/location schema 1 or P4 tonal semantics. `processed` means usable notation;
+consult component outcomes and live capabilities for analyses/default MIDI.
+Persisted task association/terminal metadata make polling safe across missing
+Celery results; foreign task IDs are ignored. Optional failures preserve valid
+outputs and never become musical values or expose server exception paths.
+
+See `tests/PROCESSING_API.md` and `tests/P5_EVIDENCE.md` for exact behavior,
+compatibility, migration 0012, controlled checks and frontend-only handoff.
+102 passing checks; known-defect suite intentionally empty after moving the final
+nested-error probe into passing discovery. Recognition/audio/runtime/browser
+limits remain explicit; P2 VERIFY, P6 TODO. No frontend changes or deployment.
+
+### P6 reliability addendum (2026-10-23)
+
+P6.1-P6.10 implement explicitly owned ephemeral analysis sessions. Migration 0013
+adds conservative legacy ownership defaults, terminal/deadline timestamps and
+deletion intent; it performs no historical adoption or data deletion. Availability
+ends one hour after terminal processing. Complete directory/row/join deletion is
+idempotent, retains retry intent on failure and protects shared catalog/categories.
+Audiveris workspaces are now within the session root. Historical external copies
+and unowned rows remain excluded; never sweep fixtures or output filename patterns.
+
+`cleanup_analyses` supplies broker-independent recovery and cleanup, with a
+one-minute loop service in Compose. OS locks on the shared artifact volume protect
+upload, processing, summary and deletion. Workers have a one-hour hard bound;
+terminal redelivery/summary never extend the session. No tombstones: deleted and
+unknown IDs share honest unavailable-or-expired 404 responses. Lifetime metadata
+is additive; musical results and P5 partial/terminal types are unchanged.
+
+Contract, examples, runtime/topology requirements and exclusions:
+`tests/LIFECYCLE_API.md`. Verification/handoff: `tests/P6_EVIDENCE.md`. Apply 0013
+before startup; it was tested only in isolated test databases. Linux worker/broker,
+PostgreSQL outage delivery, real recognition/audio and browser UX remain unverified.
+P2 stays VERIFY. Frontend remains read-only; no commit, push or deployment.

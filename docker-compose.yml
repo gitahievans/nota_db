@@ -83,6 +83,22 @@ services:
       - web
     restart: unless-stopped
 
+  analysis-cleanup:
+    image: nota_db-app:prod
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      - DJANGO_ENV=production
+      - DEBUG=${DEBUG:-0}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - nota_tmp:/tmp/nota
+    entrypoint: ["python", "manage.py", "cleanup_analyses", "--loop", "--interval", "60"]
+
 volumes:
   postgres_data:
   redis_data:

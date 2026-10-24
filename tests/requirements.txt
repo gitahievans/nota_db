@@ -1,0 +1,21 @@
+# Phase 1 offline checks: same direct versions as backend requirements where pinned.
+# Basic Pitch and production services are deliberately not needed by this suite.
+Django==5.2.1
+djangorestframework==3.16.0
+celery==5.5.2
+music21==9.1.0
+psutil==7.2.1
+django-storages==1.14.6
+boto3==1.38.17
+psycopg2-binary==2.9.10
+# Current views import optional AI/OCR modules eagerly; tests never call AI services.
+django-ai-assistant==0.1.2
+langchain>=0.3,<0.4
+langchain-openai==0.2.14
+google-generativeai==0.8.6
+opencv-contrib-python-headless==4.10.0.84
+numpy==1.26.4
+Pillow==12.1.0
+pytesseract==0.3.13
+PyPDF2==3.0.1
+pdfplumber==0.11.9

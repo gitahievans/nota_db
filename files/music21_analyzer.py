@@ -1,3 +1,5 @@
+import copy
+from fractions import Fraction
 from music21 import (
     converter,
     chord,
@@ -8,6 +10,7 @@ from music21 import (
     stream,
     instrument,
     layout,
+    tempo,
 )
 import logging
 import json
@@ -21,12 +24,40 @@ logger = logging.getLogger(__name__)
 class MusicAnalysisOptimizer:
     """Optimized music analysis with caching and efficient traversal"""
 
-    def __init__(self, score_stream):
+    def __init__(self, score_stream, source_identity=None):
         self.score_stream = score_stream
         self.parts = list(score_stream.parts) if score_stream.parts else []
         self.analysis_cache = {}
         self._elements_cache = None
         self._notes_cache = None
+        self.identity_state = source_identity
+        self.source_identity = source_identity if source_identity and source_identity.get("complete") else None
+
+    def _part_reference(self, part):
+        if self.source_identity is None:
+            return f"p{self.parts.index(part)}", None
+        source_ids = {i.partId for i in part.getInstruments() if i.partId}
+        matches = [p for p in self.source_identity["parts"] if p["xml_id"] in source_ids]
+        if len(matches) != 1:
+            return None, None
+        staff = str(part.id).rsplit("-Staff", 1)[-1] if isinstance(part, stream.PartStaff) else None
+        return matches[0]["id"], staff
+
+    def _chord_span(self, c, chordified, part):
+        pid, staff = self._part_reference(part)
+        start = c.getOffsetInHierarchy(chordified)
+        if self.source_identity:
+            measure = c.getContextByClass(stream.Measure)
+            ms = list(chordified.getElementsByClass(stream.Measure))
+            mi = ms.index(measure) if measure in ms else None
+            match = next((m for m in self.source_identity["measures"]
+                          if m["part_id"] == pid and m["order"] == mi), None)
+            if match and match["score_onset"] is not None:
+                start = Fraction(match["score_onset"]) + Fraction(c.getOffsetInHierarchy(measure))
+            else:
+                return {"status": "unavailable", "part_id": None}
+        return {"part_id": pid, "staff": staff, "start": str(start),
+                "duration": str(c.duration.quarterLength)}
 
     def get_all_elements(self, force_refresh=False):
         """Cache all elements for efficient repeated access"""
@@ -44,18 +75,43 @@ class MusicAnalysisOptimizer:
             logger.info(f"Cached {len(self._notes_cache)} notes")
         return self._notes_cache
 
+    def _iter_articulations(self):
+        """Yield markings once per note/chord event, including distinct member marks.
+
+        Parsed MusicXML normally promotes member articulations to the chord;
+        constructed streams can retain them on members. Identity deduplication
+        within each event handles aliases without merging distinct markings.
+        """
+        elements = self.get_all_elements()
+        member_ids = {id(n) for el in elements if isinstance(el, chord.Chord)
+                      for n in el.notes}
+        seen_events = set()
+        for element in elements:
+            if isinstance(element, chord.Chord):
+                owners = (element, *element.notes)
+            elif isinstance(element, note.Note) and id(element) not in member_ids:
+                owners = (element,)
+            else:
+                continue
+            if id(element) in seen_events:
+                continue
+            seen_events.add(id(element))
+            seen_markings = set()
+            for owner in owners:
+                for marking in owner.articulations:
+                    if id(marking) not in seen_markings:
+                        seen_markings.add(id(marking))
+                        yield marking
+
     def analyze_key(self) -> str:
-        """Optimized key analysis"""
-        cache_key = "key_analysis"
-        if cache_key not in self.analysis_cache:
-            try:
-                key_result = self.score_stream.analyze("key")
-                self.analysis_cache[cache_key] = str(key_result)
-                logger.info(f"Detected key: {self.analysis_cache[cache_key]}")
-            except Exception as e:
-                logger.warning(f"Key analysis failed: {str(e)}")
-                self.analysis_cache[cache_key] = f"Error: {str(e)}"
-        return self.analysis_cache[cache_key]
+        """Legacy labelled estimate; written signatures live in key_analysis."""
+        try:
+            if not self.score_stream.recurse().notes:
+                return "Not specified"
+            estimate = self.score_stream.toSoundingPitch(inPlace=False).analyze("KrumhanslSchmuckler")
+            return f"Estimated tonal key: {estimate}"
+        except Exception:
+            return "Not specified"
 
     def analyze_parts(self) -> List[str]:
         """Optimized part analysis"""
@@ -78,41 +134,30 @@ class MusicAnalysisOptimizer:
                 self.analysis_cache[cache_key] = [f"Error: {str(e)}"]
         return self.analysis_cache[cache_key]
 
-    def analyze_chords(self, max_chords=10) -> List[Dict[str, Any]]:
-        """Optimized chord analysis with limit"""
-        cache_key = f"chords_analysis_{max_chords}"
-        if cache_key not in self.analysis_cache:
-            try:
-                chords = []
-                for part in self.parts:
-                    if len(chords) >= max_chords:
-                        break
-
-                    try:
-                        chordified = part.chordify()
-                        part_chords = chordified.recurse().getElementsByClass(
-                            chord.Chord
-                        )
-
-                        for c in part_chords:
-                            if len(chords) >= max_chords:
-                                break
-                            chord_name = c.pitchedCommonName if c.isChord else "N/A"
-                            chords.append(
-                                {"pitch": chord_name, "offset": float(c.offset)}
-                            )
-                    except Exception as part_error:
-                        logger.warning(
-                            f"Chord analysis failed for part {part.id}: {part_error}"
-                        )
-                        continue
-
-                self.analysis_cache[cache_key] = chords
-                logger.info(f"Detected {len(chords)} chords")
-            except Exception as e:
-                logger.error(f"Chord analysis failed: {str(e)}")
-                self.analysis_cache[cache_key] = [f"Error: {str(e)}"]
-        return self.analysis_cache[cache_key]
+    def analyze_chords(self, max_chords=None) -> List[Dict[str, Any]]:
+        """Complete simultaneous sonorities; max_chords is retained but never truncates."""
+        if self.identity_state is not None and not self.identity_state.get("complete"):
+            return []
+        if self.source_identity:
+            from .tonal_analysis import harmony_analysis
+            if "harmony" not in self.analysis_cache:
+                self.analysis_cache["harmony"] = harmony_analysis(self.source_identity)
+            return [{"pitch": s["suggestion"]["label"] if s["suggestion"] else "Unlabelled sonority",
+                     "offset": float(Fraction(s["start"])), "sonority_id": s["id"],
+                     "span": {"part_id": None, "start": s["start"], "duration": s["duration"]},
+                     "event_ids": s["event_ids"]}
+                    for s in self.analysis_cache["harmony"]["sonorities"]]
+        # Internal stream-only callers have no served-artifact revision to reference.
+        from .tonal_analysis import describe_sonority
+        combined = self.score_stream.toSoundingPitch(inPlace=False).chordify()
+        result = []
+        for c in combined.recurse().getElementsByClass(chord.Chord):
+            _, suggestion = describe_sonority([p.ps for p in c.pitches], [p.nameWithOctave for p in c.pitches])
+            start = c.getOffsetInHierarchy(combined)
+            result.append({"pitch": suggestion["label"] if suggestion else "Unlabelled sonority",
+                           "offset": float(start), "span": {"part_id": None,
+                           "start": str(start), "duration": str(c.duration.quarterLength)}})
+        return result
 
     def analyze_time_signature(self) -> str:
         """Optimized time signature analysis"""
@@ -134,7 +179,7 @@ class MusicAnalysisOptimizer:
         return self.analysis_cache[cache_key]
 
     def analyze_notable_elements(self) -> Dict[str, Any]:
-        """Optimized notable elements analysis with single traversal"""
+        """Analyze markings using cached elements and legacy accidental scope."""
         cache_key = "notable_elements_analysis"
         if cache_key not in self.analysis_cache:
             try:
@@ -154,7 +199,7 @@ class MusicAnalysisOptimizer:
                     "dynamics": {"values": [], "has_dynamics": False},
                 }
 
-                # Single traversal for all elements
+                # Preserve legacy pitch-alteration counts on standalone notes.
                 notes = self.get_all_notes()
                 dynamics_set = set()
 
@@ -173,23 +218,16 @@ class MusicAnalysisOptimizer:
                         else:
                             notable_elements["accidentals"]["others"] += 1
 
-                    # Articulations analysis
-                    for art in element.articulations:
-                        if isinstance(art, articulations.Staccato):
-                            notable_elements["articulations"]["staccato"]["count"] += 1
-                            notable_elements["articulations"]["staccato"][
-                                "has_staccato"
-                            ] = True
-                        elif isinstance(art, articulations.Accent):
-                            notable_elements["articulations"]["accent"]["count"] += 1
-                            notable_elements["articulations"]["accent"][
-                                "has_accent"
-                            ] = True
-                        elif isinstance(art, articulations.Tenuto):
-                            notable_elements["articulations"]["tenuto"]["count"] += 1
-                            notable_elements["articulations"]["tenuto"][
-                                "has_tenuto"
-                            ] = True
+                # Count notation markings, not the number of affected pitches.
+                for art in self._iter_articulations():
+                    if isinstance(art, articulations.Staccato):
+                        notable_elements["articulations"]["staccato"]["count"] += 1
+                    elif isinstance(art, articulations.Accent):
+                        notable_elements["articulations"]["accent"]["count"] += 1
+                    elif isinstance(art, articulations.Tenuto):
+                        notable_elements["articulations"]["tenuto"]["count"] += 1
+                for name, values in notable_elements["articulations"].items():
+                    values[f"has_{name}"] = values["count"] > 0
 
                 # Process dynamics separately (less common)
                 for element in self.get_all_elements():
@@ -205,7 +243,7 @@ class MusicAnalysisOptimizer:
                 )
 
                 self.analysis_cache[cache_key] = notable_elements
-                logger.info(f"Detected notable elements in single traversal")
+                logger.info("Detected notable elements from cached score elements")
             except Exception as e:
                 logger.error(f"Notable elements analysis failed: {str(e)}")
                 self.analysis_cache[cache_key] = {"error": f"Error: {str(e)}"}
@@ -532,207 +570,83 @@ class MusicAnalysisOptimizer:
                 self.analysis_cache[cache_key] = {"error": f"Error: {str(e)}"}
         return self.analysis_cache[cache_key]
 
+    def _location(self, element):
+        measure = element.getContextByClass(stream.Measure)
+        part = element.getContextByClass(stream.Part)
+        pid, staff = self._part_reference(part) if part in self.parts else (None, None)
+        ms = list(part.getElementsByClass(stream.Measure)) if part is not None else []
+        mi = ms.index(measure) if measure in ms else None
+        local = element.getOffsetInHierarchy(measure) if measure is not None else None
+        onset = element.getOffsetInHierarchy(self.score_stream)
+        if self.source_identity:
+            match = next((m for m in self.source_identity["measures"]
+                          if m["part_id"] == pid and m["order"] == mi), None)
+            onset = Fraction(match["score_onset"]) + Fraction(local) if match and match["score_onset"] is not None and local is not None else None
+        return {"score_onset": str(onset) if onset is not None else None,
+                "measure_onset": str(local) if local is not None else None,
+                "part_id": pid, "staff": staff,
+                "measure_id": f"{pid}:m{mi}" if mi is not None and pid else None}
+
     def analyze_meter_changes(self) -> Dict[str, Any]:
-        """Analyze meter/time signature changes throughout the score"""
-        cache_key = "meter_changes_analysis"
-        if cache_key not in self.analysis_cache:
-            try:
-                meter_data = {
-                    "time_signatures": [],
-                    "changes": [],
-                    "total_changes": 0,
-                    "has_meter_changes": False,
-                }
-
-                # Get all time signatures from the score
-                time_signatures = self.score_stream.recurse().getElementsByClass(
-                    meter.TimeSignature
-                )
-
-                current_ts = None
-                for ts in time_signatures:
-                    ts_string = str(ts.ratioString)
-                    offset = float(ts.offset) if hasattr(ts, "offset") else 0.0
-
-                    # Track unique time signatures
-                    if ts_string not in [
-                        t["signature"] for t in meter_data["time_signatures"]
-                    ]:
-                        meter_data["time_signatures"].append(
-                            {
-                                "signature": ts_string,
-                                "numerator": ts.numerator,
-                                "denominator": ts.denominator,
-                                "first_occurrence": offset,
-                            }
-                        )
-
-                    # Track changes
-                    if current_ts is not None and current_ts != ts_string:
-                        meter_data["changes"].append(
-                            {
-                                "from_signature": current_ts,
-                                "to_signature": ts_string,
-                                "offset": offset,
-                                "measure": self._offset_to_measure(offset),
-                            }
-                        )
-                        meter_data["total_changes"] += 1
-                        meter_data["has_meter_changes"] = True
-
-                    current_ts = ts_string
-
-                # If no time signatures found, set default
-                if not meter_data["time_signatures"]:
-                    meter_data["time_signatures"].append(
-                        {
-                            "signature": "4/4",
-                            "numerator": 4,
-                            "denominator": 4,
-                            "first_occurrence": 0.0,
-                        }
-                    )
-
-                self.analysis_cache[cache_key] = meter_data
-                logger.info(
-                    f"Detected {len(meter_data['time_signatures'])} time signatures with {meter_data['total_changes']} changes"
-                )
-            except Exception as e:
-                logger.error(f"Meter changes analysis failed: {str(e)}")
-                self.analysis_cache[cache_key] = {"error": f"Error: {str(e)}"}
-        return self.analysis_cache[cache_key]
+        """Compare chronological markings within each part, then reconcile copies."""
+        signatures, changes = {}, {}
+        for pi, part in enumerate(self.parts):
+            previous = None
+            markings = sorted(part.recurse().getElementsByClass(meter.TimeSignature),
+                              key=lambda t: t.getOffsetInHierarchy(self.score_stream))
+            for ts in markings:
+                loc = self._location(ts)
+                if loc["score_onset"] is None:
+                    continue
+                offset = float(Fraction(loc["score_onset"]))
+                signature = ts.ratioString
+                existing = signatures.get(signature)
+                if existing is None or offset < existing["first_occurrence"]:
+                    signatures[signature] = {"signature": signature, "numerator": ts.numerator,
+                        "denominator": ts.denominator, "first_occurrence": offset}
+                if previous is not None and previous != signature:
+                    key = (offset, previous, signature)
+                    if key not in changes:
+                        m = ts.getContextByClass(stream.Measure)
+                        changes[key] = {"from_signature": previous, "to_signature": signature,
+                            "offset": offset, "measure": m.number if m is not None else None,
+                            "locations": []}
+                    changes[key]["locations"].append(loc)
+                previous = signature
+        result = sorted(changes.values(), key=lambda c: c["offset"])
+        return {"time_signatures": sorted(signatures.values(), key=lambda t: t["first_occurrence"]),
+                "changes": result, "total_changes": len(result), "has_meter_changes": bool(result)}
 
     def analyze_tempo(self) -> Dict[str, Any]:
-        """Analyze tempo markings and BPM throughout the score"""
-        cache_key = "tempo_analysis"
-        if cache_key not in self.analysis_cache:
-            try:
-                tempo_data = {
-                    "tempo_markings": [],
-                    "bpm_changes": [],
-                    "initial_bpm": None,
-                    "average_bpm": None,
-                    "has_tempo_changes": False,
-                }
+        """Structured map; the HTTP legacy projection is a separate display string."""
+        from .tonal_analysis import tempo_analysis
+        if self.identity_state is not None:
+            return tempo_analysis(self.identity_state)
+        # Stream-only analysis must distinguish text-derived speed from explicit numbers.
+        markings = []
+        for el in self.score_stream.recurse().getElementsByClass(tempo.MetronomeMark):
+            loc = self._location(el)
+            if el.number is not None and not el.numberImplicit:
+                value = str(el.getQuarterBPM())
+                kind = "sound_tempo"
+            else:
+                from xml.sax.saxutils import escape
+                value = "<words>" + escape(el.text or "Tempo text") + "</words>"
+                kind = "words"
+            markings.append({"id": f"stream-tempo{len(markings)}", "kind": kind,
+                             "value": value, "sources": [{"location": loc}]})
+        return tempo_analysis({"markings": markings})
 
-                # Get all tempo indications
-                tempo_indications = self.score_stream.recurse().getElementsByClass(
-                    tempo.TempoIndication
-                )
-                metronome_marks = self.score_stream.recurse().getElementsByClass(
-                    tempo.MetronomeMark
-                )
-
-                all_tempos = []
-
-                # Process tempo indications (like "Allegro", "Andante", etc.)
-                for ti in tempo_indications:
-                    tempo_info = {
-                        "type": "indication",
-                        "text": str(ti.text) if hasattr(ti, "text") else str(ti),
-                        "offset": float(ti.offset) if hasattr(ti, "offset") else 0.0,
-                        "bpm": None,
-                    }
-
-                    # Try to get BPM from tempo indication
-                    if hasattr(ti, "getSoundingQuarterBPM"):
-                        try:
-                            tempo_info["bpm"] = ti.getSoundingQuarterBPM()
-                        except:
-                            pass
-
-                    tempo_data["tempo_markings"].append(tempo_info)
-                    if tempo_info["bpm"]:
-                        all_tempos.append(tempo_info["bpm"])
-
-                # Process metronome marks (explicit BPM markings)
-                for mm in metronome_marks:
-                    tempo_info = {
-                        "type": "metronome",
-                        "text": str(mm),
-                        "offset": float(mm.offset) if hasattr(mm, "offset") else 0.0,
-                        "bpm": None,
-                    }
-
-                    # Get BPM from metronome mark
-                    if hasattr(mm, "number"):
-                        tempo_info["bpm"] = mm.number
-                    elif hasattr(mm, "getQuarterBPM"):
-                        try:
-                            tempo_info["bpm"] = mm.getQuarterBPM()
-                        except:
-                            pass
-
-                    tempo_data["tempo_markings"].append(tempo_info)
-                    if tempo_info["bpm"]:
-                        all_tempos.append(tempo_info["bpm"])
-
-                # Analyze tempo changes
-                previous_bpm = None
-                for marking in sorted(
-                    tempo_data["tempo_markings"], key=lambda x: x["offset"]
-                ):
-                    if marking["bpm"]:
-                        if previous_bpm is not None and previous_bpm != marking["bpm"]:
-                            tempo_data["bpm_changes"].append(
-                                {
-                                    "from_bpm": previous_bpm,
-                                    "to_bpm": marking["bpm"],
-                                    "offset": marking["offset"],
-                                    "measure": self._offset_to_measure(
-                                        marking["offset"]
-                                    ),
-                                }
-                            )
-                            tempo_data["has_tempo_changes"] = True
-
-                        if tempo_data["initial_bpm"] is None:
-                            tempo_data["initial_bpm"] = marking["bpm"]
-
-                        previous_bpm = marking["bpm"]
-
-                # Calculate average BPM
-                if all_tempos:
-                    tempo_data["average_bpm"] = sum(all_tempos) / len(all_tempos)
-
-                # If no tempo found, try to estimate from the score
-                if not tempo_data["tempo_markings"]:
-                    try:
-                        # music21 can sometimes infer tempo
-                        estimated_tempo = self.score_stream.metronomeMarkBoundaries()
-                        if estimated_tempo:
-                            tempo_data["tempo_markings"].append(
-                                {
-                                    "type": "estimated",
-                                    "text": "Estimated",
-                                    "offset": 0.0,
-                                    "bpm": (
-                                        estimated_tempo[0][2].number
-                                        if hasattr(estimated_tempo[0][2], "number")
-                                        else None
-                                    ),
-                                }
-                            )
-                    except:
-                        pass
-
-                self.analysis_cache[cache_key] = tempo_data
-                logger.info(
-                    f"Detected {len(tempo_data['tempo_markings'])} tempo markings"
-                )
-            except Exception as e:
-                logger.error(f"Tempo analysis failed: {str(e)}")
-                self.analysis_cache[cache_key] = {"error": f"Error: {str(e)}"}
-        return self.analysis_cache[cache_key]
-
-    def _offset_to_measure(self, offset: float) -> int:
-        """Convert offset to approximate measure number"""
-        try:
-            # This is a simplified conversion - in practice, you'd need to account for time signatures
-            # Assuming 4/4 time for now
-            return int(offset / 4.0) + 1
-        except:
-            return 1
+    def _offset_to_measure(self, offset):
+        """Legacy numeric label; absent when no real containing measure exists."""
+        if not self.parts:
+            return None
+        measures = list(self.parts[0].getElementsByClass(stream.Measure))
+        for m in reversed(measures):
+            start = float(m.getOffsetInHierarchy(self.score_stream))
+            if start <= offset < start + float(m.duration.quarterLength):
+                return m.number
+        return None
 
     def _detect_ensemble_type(
         self, score_structure: Dict, instruments: List[str]
@@ -788,8 +702,9 @@ class MusicAnalysisOptimizer:
                 )
 
                 if is_satb:
-                    score_structure["parts"] = ["Soprano", "Alto", "Tenor", "Bass"]
-                    return "SATB"
+                    score_structure["inferred_part_roles"] = ["Soprano", "Alto", "Tenor", "Bass"]
+                    score_structure["inference_method"] = "pitch_range_heuristic"
+                    return "Custom Ensemble"
             except Exception as e:
                 logger.warning(f"Pitch range analysis failed: {e}")
 
@@ -800,16 +715,42 @@ def analyze_with_music21(mxl_path: str, score) -> Dict[str, Any]:
     """
     Optimized Music21 analysis with improved performance and resource management
     """
+    analysis = {}
+    def attempt(callback):
+        try:
+            return callback()
+        except Exception:
+            logger.exception("Analysis component failed")
+            return {"error": "Component could not be completed."}
+
+    def legacy_attempt(name, callback, fallback):
+        from .outcomes import has_error, outcome
+        value = attempt(callback)
+        if has_error(value):
+            analysis.setdefault("analysis_errors", {})[name] = outcome(
+                "failed", "ANALYZING_SCORE", name + "_failed", name.replace("_", " ") + " could not be completed.")
+            return fallback
+        return value
+
     try:
         # Parse the MusicXML file
         logger.info(f"Parsing MusicXML file: {mxl_path}")
-        score_stream = converter.parse(mxl_path)
+        score_stream = converter.parse(mxl_path, forceSource=True)
+
+        # Additive source index; failures never discard P2 notation/playback artifacts.
+        from .musical_identity import build_identity
+        try:
+            identity = build_identity(mxl_path)
+        except Exception:
+            identity = {"schema_version": 1, "status": "failed", "complete": False,
+                        "code": "invalid_source_index"}
 
         # Initialize optimizer
-        optimizer = MusicAnalysisOptimizer(score_stream)
+        optimizer = MusicAnalysisOptimizer(score_stream, source_identity=identity)
 
         # Initialize analysis structure
         analysis = {
+            "musical_identity": identity,
             "key": None,
             "measures": {},
             "instrumentation": {},
@@ -831,27 +772,55 @@ def analyze_with_music21(mxl_path: str, score) -> Dict[str, Any]:
         # Generate MIDI (potentially expensive operation)
         try:
             midi_file = settings.TEMP_STORAGE_DIR / f"{score.id}/{score.id}.mid"
-            score_stream.write("midi", fp=midi_file)
+            midi_file.unlink(missing_ok=True)
+            copy.deepcopy(score_stream).write("midi", fp=midi_file)
+            analysis["playback"] = {"status": "available", "derived_from": "canonical_displayed_xml", "synchronization": "not_guaranteed"}
             score.midi_url = f"/api/serve-midi/{score.id}/"
             logger.info(f"Generated MIDI file for score {score.id}")
         except Exception as e:
             logger.error(f"MIDI generation failed: {str(e)}")
-            score.midi_url = f"Error: {str(e)}"
+            midi_file.unlink(missing_ok=True)
+            score.midi_url = None
+            analysis["playback"] = {"status": "failed", "derived_from": "canonical_displayed_xml", "error": str(e)}
+
+        # Persist export availability before independently fallible analyses.
+        type(score).objects.filter(pk=score.id, job_state="RUNNING").update(midi_url=score.midi_url)
 
         # Perform optimized analysis
         logger.info("Starting optimized musical analysis")
 
         # Core analysis using optimizer
-        analysis["key"] = optimizer.analyze_key()
-        analysis["parts"] = optimizer.analyze_parts()
-        analysis["chords"] = optimizer.analyze_chords(max_chords=10)
-        analysis["time_signature"] = optimizer.analyze_time_signature()
-        analysis["notable_elements"] = optimizer.analyze_notable_elements()
-        analysis["score_structure"] = optimizer.analyze_score_structure()
-        analysis["measures"] = optimizer.analyze_measures()
-        analysis["instrumentation"] = optimizer.analyze_instrumentation()
-        analysis["meter_changes"] = optimizer.analyze_meter_changes()
-        analysis["tempo"] = optimizer.analyze_tempo()
+        analysis["parts"] = legacy_attempt("parts", lambda: optimizer.analyze_parts(), [])
+        analysis["chords"] = legacy_attempt("chords", lambda: optimizer.analyze_chords(), [])
+        analysis["time_signature"] = legacy_attempt("time_signature", lambda: optimizer.analyze_time_signature(), "Not specified")
+        analysis["notable_elements"] = attempt(lambda: optimizer.analyze_notable_elements())
+        analysis["score_structure"] = attempt(lambda: optimizer.analyze_score_structure())
+        analysis["measures"] = attempt(lambda: optimizer.analyze_measures())
+        analysis["instrumentation"] = attempt(lambda: optimizer.analyze_instrumentation())
+        analysis["meter_changes"] = attempt(lambda: optimizer.analyze_meter_changes())
+        analysis["tempo_analysis"] = attempt(lambda: optimizer.analyze_tempo())
+        initial = analysis["tempo_analysis"].get("initial_bpm")
+        analysis["tempo"] = f"{initial:g} quarter notes/min" if initial is not None else "Not specified"
+        from .tonal_analysis import key_analysis, harmony_analysis, accidental_observations
+        audio = getattr(score, "source_type", None) == "audio"
+        analysis["key_analysis"] = attempt(lambda: key_analysis(score_stream, identity, audio=audio))
+        estimate = analysis["key_analysis"].get("estimate", {})
+        analysis["key"] = ("Estimated tonal key: " + estimate["label"]
+                           if estimate.get("status") == "estimated" else "Not specified")
+        analysis["harmony"] = attempt(lambda: harmony_analysis(identity))
+        analysis["accidental_observations"] = attempt(lambda: dict(
+            schema_version=1, artifact_revision=identity.get("artifact_revision"),
+            status="complete" if identity.get("complete") else "unsupported",
+            observations=accidental_observations(mxl_path) if identity.get("complete") else [],
+            legacy_counts="Pitch alterations on standalone notes; not printed accidental counts."))
+        if audio:
+            analysis["tempo_analysis"]["notation_origin"] = "inferred_audio_draft"
+        else:
+            analysis["tempo_analysis"]["notation_origin"] = "canonical_notation"
+
+        if identity.get("complete"):
+            from .musical_identity import anchor_analysis
+            analysis["analysis_references"] = attempt(lambda: anchor_analysis(analysis, identity))
 
         # Load text extraction results (I/O operation)
         try:
@@ -865,7 +834,8 @@ def analyze_with_music21(mxl_path: str, score) -> Dict[str, Any]:
                 logger.info("Added text extraction results")
             else:
                 logger.warning("No text extraction results found")
-                analysis["text_content"] = {
+                from .outcomes import read_results
+                analysis["text_content"] = read_results(score.results).get("text_content") or {
                     "message": "No text extraction results available"
                 }
         except Exception as e:
@@ -889,7 +859,7 @@ def analyze_with_music21(mxl_path: str, score) -> Dict[str, Any]:
             f" - Instrumentation: {analysis['instrumentation'].get('instruments', [])}"
         )
         logger.info(
-            f"  - Tempo markings: {len(analysis['tempo'].get('tempo_markings', []))}"
+            f"  - Tempo markings: {len(analysis['tempo_analysis'].get('tempo_markings', []))}"
         )
         logger.info(
             f"  - Meter changes: {len(analysis['meter_changes'].get('changes', []))}"
@@ -899,17 +869,8 @@ def analyze_with_music21(mxl_path: str, score) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Music21 analysis failed: {str(e)}")
-        return {
-            "error": f"Analysis failed: {str(e)}",
-            "key": "Error",
-            "parts": ["Error"],
-            "chords": [],
-            "time_signature": "Error",
-            "notable_elements": {"error": str(e)},
-            "score_structure": {"error": str(e)},
-            "text_content": {"error": str(e)},
-            "tempo": {"error": str(e)},
-            "meter_changes": {"error": str(e)},
-            "measures": {"error": str(e)},
-            "instrumentation": {"error": str(e)},
-        }
+        analysis["failure_stage"] = "ANALYZING_SCORE" if analysis else "PARSING_MUSICXML"
+        analysis["error"] = "Analysis could not be completed."
+        analysis.setdefault("key", "Error")
+        analysis.setdefault("tempo", {"error": "Tempo unavailable."})
+        return analysis

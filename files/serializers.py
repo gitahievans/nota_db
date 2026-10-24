@@ -5,6 +5,7 @@ from rest_framework import serializers
 from django.conf import settings
 
 from .models import PDFFile, Category
+from .outcomes import read_results, available
 
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 
@@ -70,6 +71,7 @@ class FileSerializer(serializers.ModelSerializer):
     results = serializers.SerializerMethodField()
     source_audio_url = serializers.SerializerMethodField()
     playback_midi_url = serializers.SerializerMethodField()
+    raw_preview_midi_url = serializers.SerializerMethodField()
 
     class Meta:
         model = PDFFile
@@ -88,20 +90,15 @@ class FileSerializer(serializers.ModelSerializer):
             "source_type",
             "source_audio_url",
             "playback_midi_url",
+            "raw_preview_midi_url",
         ]
 
     def get_results(self, obj):
-        if obj.results:
-            try:
-                # If results is already a dict, return it; if a string, parse it
-                if isinstance(obj.results, dict):
-                    return obj.results
-                return json.loads(obj.results)
-            except json.JSONDecodeError as e:
-                return {"error": f"Invalid JSON: {str(e)}"}
-        return None
+        return read_results(obj.results) if obj.results else None
 
     def validate_file(self, value):
+        if self.instance and self.instance.retention_kind == "analysis":
+            raise serializers.ValidationError("Upload a new analysis session to process another input.")
         if not is_supported_upload(value.name, value.content_type):
             raise serializers.ValidationError(
                 "Only PDF, JPEG, PNG, TIFF, WebP, MP3, WAV, and M4A files are allowed."
@@ -120,12 +117,14 @@ class FileSerializer(serializers.ModelSerializer):
         return None
 
     def get_playback_midi_url(self, obj):
-        if obj.source_type != PDFFile.SOURCE_TYPE_AUDIO:
-            return obj.midi_url
-        preview_path = Path(settings.TEMP_STORAGE_DIR) / str(obj.id) / "preview.mid"
-        if preview_path.exists():
+        url = obj.midi_url
+        return url if available(obj, "midi") else None
+
+    def get_raw_preview_midi_url(self, obj):
+        path = Path(settings.TEMP_STORAGE_DIR) / str(obj.id) / "preview.mid"
+        if obj.source_type == PDFFile.SOURCE_TYPE_AUDIO and path.exists():
             return f"/api/serve-preview-midi/{obj.id}/"
-        return obj.midi_url
+        return None
 
     def create(self, validated_data):
         categories_data = validated_data.pop("categories", [])
@@ -157,6 +156,18 @@ class FileSerializer(serializers.ModelSerializer):
                 category, created = Category.objects.get_or_create(name=category_name)
                 instance.categories.add(category)
         return instance
+
+    def to_representation(self, instance):
+        from .lifecycle import lifetime
+        data = super().to_representation(instance)
+        data["lifetime"] = lifetime(instance)
+        if not available(instance, "notation"):
+            data["musicxml_url"] = None
+        if not available(instance, "midi"):
+            data["midi_url"] = None
+        data["capabilities"] = {"notation": available(instance, "notation"), "default_playback": available(instance, "midi")}
+        data["results_schema_version"] = read_results(instance.results).get("schema_version", 1)
+        return data
 
     def to_internal_value(self, data):
         categories_data = data.get("categories")

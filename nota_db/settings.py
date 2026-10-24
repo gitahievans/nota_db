@@ -42,6 +42,9 @@ TEMP_STORAGE_DIR = Path("/tmp/nota")
 TEMP_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 CLEANUP_DELAY_SECONDS = 60 * 60  # 1 hour
+ANALYSIS_JOB_STALE_SECONDS = 3600
+# P5 polling recovery: maximum interval without a recorded stage update, not retention.
+ANALYSIS_JOB_STALE_SECONDS = 60 * 60
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
@@ -224,6 +227,9 @@ MEDIA_ROOT = BASE_DIR / "media" if DEBUG else None
 # Celery configuration
 CELERY_BROKER_URL = "redis://redis:6379/0"
 CELERY_RESULT_BACKEND = "redis://redis:6379/0"
+CELERY_RESULT_EXPIRES = 3600  # Task metadata is temporary too; cleanup also forgets it.
+CELERY_REDIS_SOCKET_CONNECT_TIMEOUT = 2
+CELERY_REDIS_SOCKET_TIMEOUT = 2
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"

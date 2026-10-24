@@ -148,10 +148,11 @@ def _assign_piano_hands(events: list[dict]) -> tuple[list[dict], list[dict], int
     return right_hand, left_hand, threshold
 
 
-def _build_single_part(events: list[dict], part_clef, part_name: str) -> stream.Part:
+def _build_single_part(events: list[dict], part_clef, part_name: str, time_signature) -> stream.Part:
     part = stream.Part()
     part.insert(0, instrument.Piano())
     part.insert(0, part_clef)
+    part.insert(0, meter.TimeSignature(time_signature.ratioString))
     part.partName = part_name
     for offset, onset_events in _group_events_by_offset(events).items():
         part.insert(offset, _create_music21_element(onset_events))
@@ -164,7 +165,9 @@ def normalize_score_stream(
     raw_stream: stream.Stream,
     source_type: str,
 ) -> tuple[stream.Score, dict]:
-    aggressive = source_type == "audio"
+    if source_type != "audio":
+        raise ValueError("Event reconstruction is only supported for approximate audio drafts")
+    aggressive = True
     raw_note_events = _extract_note_events(raw_stream, aggressive)
     cleaned_events = _dedupe_and_prune_events(raw_note_events, aggressive)
 
@@ -178,7 +181,10 @@ def normalize_score_stream(
         "applied": True,
         "source": "audio" if aggressive else "omr",
         "transcription_quality": "draft" if aggressive else "repaired",
-        "detected_instrument_hint": "piano" if piano_split_used else "single_part",
+        "approximate": True,
+        "inferred_choices": {"instrument": "piano_synthesis_default", "staves": "pitch_range_heuristic",
+                             "meter": time_signature.ratioString, "tempo_bpm": tempo_mark.number,
+                             "context": "MIDI context or fallback, not written recording facts"},
         "used_piano_split": piano_split_used,
         "cleanup_summary": {
             "raw_note_events": len(raw_note_events),
@@ -191,15 +197,15 @@ def normalize_score_stream(
         right_part = _build_single_part(
             right_hand_events,
             clef.TrebleClef(),
-            "Right Hand" if aggressive else "Upper Staff",
+            "Inferred Upper Staff",
+            time_signature,
         )
         left_part = _build_single_part(
             left_hand_events,
             clef.BassClef(),
-            "Left Hand" if aggressive else "Lower Staff",
+            "Inferred Lower Staff",
+            time_signature,
         )
-        right_part.insert(0, time_signature)
-        left_part.insert(0, meter.TimeSignature(str(time_signature.ratioString)))
         cleaned_score.insert(0, right_part)
         cleaned_score.insert(0, left_part)
         metadata["cleanup_summary"]["piano_split_threshold"] = threshold
@@ -209,9 +215,9 @@ def normalize_score_stream(
         single_part = _build_single_part(
             cleaned_events,
             part_clef,
-            "Transcribed Part" if aggressive else "Recognized Part",
+            "Audio Draft",
+            time_signature,
         )
-        single_part.insert(0, time_signature)
         cleaned_score.insert(0, single_part)
 
     cleaned_score.makeNotation(inPlace=True)
